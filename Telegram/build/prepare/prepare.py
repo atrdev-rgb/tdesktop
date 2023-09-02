@@ -442,7 +442,7 @@ win:
 
 stage('jom', """
 win:
-    powershell -Command "iwr -OutFile ./jom.zip https://master.qt.io/official_releases/jom/jom_1_1_3.zip"
+    powershell -Command "iwr -OutFile ./jom.zip https://qt-mirror.dannhauer.de/official_releases/jom/jom_1_1_3.zip"
     powershell -Command "Expand-Archive ./jom.zip"
     del jom.zip
 """, 'ThirdParty')
