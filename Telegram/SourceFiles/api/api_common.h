@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "data/data_drafts.h"
+
 class History;
 
 namespace Data {
@@ -22,8 +24,8 @@ struct SendOptions {
 	TimeId scheduled = 0;
 	bool silent = false;
 	bool handleSupportSwitch = false;
-	bool removeWebPageId = false;
 	bool hideViaBot = false;
+	crl::time ttlSeconds = 0;
 };
 [[nodiscard]] SendOptions DefaultSendWhenOnlineOptions();
 
@@ -40,11 +42,12 @@ struct SendAction {
 
 	not_null<History*> history;
 	SendOptions options;
-	MsgId replyTo = 0;
-	MsgId topicRootId = 0;
+	FullReplyTo replyTo;
 	bool clearDraft = true;
 	bool generateLocal = true;
 	MsgId replaceMediaOf = 0;
+
+	[[nodiscard]] MTPInputReplyTo mtpReplyTo() const;
 };
 
 struct MessageToSend {
@@ -53,7 +56,7 @@ struct MessageToSend {
 
 	SendAction action;
 	TextWithTags textWithTags;
-	WebPageId webPageId = 0;
+	Data::WebPageDraft webPage;
 };
 
 struct RemoteFileInfo {

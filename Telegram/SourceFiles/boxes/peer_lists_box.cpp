@@ -281,9 +281,7 @@ void PeerListsBox::resizeEvent(QResizeEvent *e) {
 void PeerListsBox::paintEvent(QPaintEvent *e) {
 	auto p = QPainter(this);
 
-	const auto &bg = (firstController()->listSt()
-		? *firstController()->listSt()
-		: st::peerListBox).bg;
+	const auto &bg = firstController()->computeListSt().bg;
 	for (const auto &rect : e->region()) {
 		p.fillRect(rect, bg);
 	}
@@ -370,16 +368,6 @@ void PeerListsBox::Delegate::peerListFinishSelectedRowsBunch() {
 	Expects(_box->_select != nullptr);
 
 	_box->_select->entity()->finishItemsBunch();
-}
-
-void PeerListsBox::Delegate::peerListShowBox(
-		object_ptr<Ui::BoxContent> content,
-		Ui::LayerOptions options) {
-	_show->showBox(std::move(content), options);
-}
-
-void PeerListsBox::Delegate::peerListHideLayer() {
-	_show->hideLayer();
 }
 
 auto PeerListsBox::Delegate::peerListUiShow()

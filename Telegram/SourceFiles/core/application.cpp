@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_photo.h"
 #include "data/data_document.h"
 #include "data/data_session.h"
+#include "data/data_stories.h"
 #include "data/data_user.h"
 #include "data/data_channel.h"
 #include "data/data_download_manager.h"
@@ -87,8 +88,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/localstorage.h"
 #include "payments/payments_checkout_process.h"
 #include "export/export_manager.h"
+#include "webrtc/webrtc_environment.h"
 #include "window/window_session_controller.h"
 #include "window/window_controller.h"
+#include "boxes/abstract_box.h"
 #include "base/qthelp_regex.h"
 #include "base/qthelp_url.h"
 #include "boxes/connection_box.h"
@@ -122,7 +125,7 @@ void SetCrashAnnotationsGL() {
 		case Ui::GL::ANGLE::D3D11: return "Direct3D 11";
 		case Ui::GL::ANGLE::D3D9: return "Direct3D 9";
 		case Ui::GL::ANGLE::D3D11on12: return "D3D11on12";
-		case Ui::GL::ANGLE::OpenGL: return "OpenGL";
+		//case Ui::GL::ANGLE::OpenGL: return "OpenGL";
 		}
 		Unexpected("Ui::GL::CurrentANGLE value in SetupANGLE.");
 	}());
@@ -143,12 +146,12 @@ struct Application::Private {
 	Settings settings;
 };
 
-Application::Application(not_null<Launcher*> launcher)
+Application::Application()
 : QObject()
-, _launcher(launcher)
 , _private(std::make_unique<Private>())
 , _platformIntegration(Platform::Integration::Create())
 , _batterySaving(std::make_unique<base::BatterySaving>())
+, _mediaDevices(std::make_unique<Webrtc::Environment>())
 , _databases(std::make_unique<Storage::Databases>())
 , _animationsManager(std::make_unique<Ui::Animations::Manager>())
 , _clearEmojiImageLoaderTimer([=] { clearEmojiSourceImages(); })
@@ -359,7 +362,7 @@ void Application::run() {
 	startDomain();
 	startTray();
 
-	_lastActivePrimaryWindow->widget()->show();
+	_lastActivePrimaryWindow->firstShow();
 
 	startMediaView();
 
@@ -427,11 +430,12 @@ void Application::showOpenGLCrashNotification() {
 		Local::writeSettings();
 		Restart();
 	};
-	const auto keepDisabled = [=] {
+	const auto keepDisabled = [=](Fn<void()> close) {
 		Ui::GL::ForceDisable(true);
 		Ui::GL::CrashCheckFinish();
 		settings().setDisableOpenGL(true);
 		Local::writeSettings();
+		close();
 	};
 	_lastActivePrimaryWindow->show(Ui::MakeConfirmBox({
 		.text = ""
@@ -512,14 +516,16 @@ void Application::startMediaView() {
 	InvokeQueued(this, [=] {
 		_mediaView = std::make_unique<Media::View::OverlayWidget>();
 	});
-#else // Q_OS_MAC
+#elif defined Q_OS_WIN // Q_OS_MAC || Q_OS_WIN
 	// On Windows we needed such hack for the main window, otherwise
 	// somewhere inside the media viewer creating code its geometry
 	// was broken / lost to some invalid values.
 	const auto current = _lastActivePrimaryWindow->widget()->geometry();
 	_mediaView = std::make_unique<Media::View::OverlayWidget>();
 	_lastActivePrimaryWindow->widget()->Ui::RpWidget::setGeometry(current);
-#endif // Q_OS_MAC
+#else
+	_mediaView = std::make_unique<Media::View::OverlayWidget>();
+#endif // Q_OS_MAC || Q_OS_WIN
 }
 
 void Application::startTray() {
@@ -679,7 +685,8 @@ bool Application::eventFilter(QObject *object, QEvent *e) {
 	} break;
 
 	case QEvent::ThemeChange: {
-		if (Platform::IsLinux() && object == QGuiApplication::allWindows().first()) {
+		if (Platform::IsLinux()
+				&& object == QGuiApplication::allWindows().constFirst()) {
 			Core::App().refreshApplicationIcon();
 			Core::App().tray().updateIconCounters();
 		}
@@ -945,20 +952,16 @@ rpl::producer<> Application::materializeLocalDraftsRequests() const {
 void Application::switchDebugMode() {
 	if (Logs::DebugEnabled()) {
 		Logs::SetDebugEnabled(false);
-		_launcher->writeDebugModeSetting();
+		Launcher::Instance().writeDebugModeSetting();
 		Restart();
 	} else {
 		Logs::SetDebugEnabled(true);
-		_launcher->writeDebugModeSetting();
+		Launcher::Instance().writeDebugModeSetting();
 		DEBUG_LOG(("Debug logs started."));
 		if (_lastActivePrimaryWindow) {
 			_lastActivePrimaryWindow->hideLayer();
 		}
 	}
-}
-
-void Application::writeInstallBetaVersionsSetting() {
-	_launcher->writeInstallBetaVersionsSetting();
 }
 
 Main::Account &Application::activeAccount() const {
@@ -1320,7 +1323,7 @@ Window::Controller *Application::ensureSeparateWindowForPeer(
 		std::make_unique<Window::Controller>(peer, showAtMsgId)
 	).first->second.get();
 	processCreatedWindow(result);
-	result->widget()->show();
+	result->firstShow();
 	result->finishFirstShow();
 	return activate(result);
 }
@@ -1340,7 +1343,7 @@ Window::Controller *Application::ensureSeparateWindowForAccount(
 		std::make_unique<Window::Controller>(account)
 	).first->second.get();
 	processCreatedWindow(result);
-	result->widget()->show();
+	result->firstShow();
 	result->finishFirstShow();
 	return activate(result);
 }
@@ -1690,6 +1693,9 @@ bool Application::readyToQuit() {
 				if (session->api().isQuitPrevent()) {
 					prevented = true;
 				}
+				if (session->data().stories().isQuitPrevent()) {
+					prevented = true;
+				}
 			}
 		}
 	}
@@ -1767,10 +1773,8 @@ void Application::startShortcuts() {
 
 void Application::RegisterUrlScheme() {
 	base::Platform::RegisterUrlScheme(base::Platform::UrlSchemeDescriptor{
-		.executable = (!Platform::IsLinux() || !Core::UpdaterDisabled())
-			? (cExeDir() + cExeName())
-			: cExeName(),
-		.arguments = Sandbox::Instance().customWorkingDir()
+		.executable = Platform::ExecutablePathForShortcuts(),
+		.arguments = Launcher::Instance().customWorkingDir()
 			? u"-workdir \"%1\""_q.arg(cWorkingDir())
 			: QString(),
 		.protocol = u"tg"_q,

@@ -30,8 +30,8 @@ public:
 	int top() override;
 	QSize size() override;
 	QString title() override;
-	QString subtitle() override;
-	QString button() override;
+	TextWithEntities subtitle() override;
+	rpl::producer<QString> button() override;
 	void draw(
 		Painter &p,
 		const PaintContext &context,

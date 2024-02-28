@@ -54,7 +54,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/painter.h"
 #include "ui/ui_utility.h"
 #include "ui/widgets/checkbox.h"
-#include "ui/widgets/input_fields.h"
+#include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/scroll_area.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
@@ -246,12 +246,12 @@ EditCaptionBox::EditCaptionBox(
 , _scroll(base::make_unique_q<Ui::ScrollArea>(this, st::boxScroll))
 , _field(base::make_unique_q<Ui::InputField>(
 	this,
-	st::confirmCaptionArea,
+	st::defaultComposeFiles.caption,
 	Ui::InputField::Mode::MultiLine,
 	tr::lng_photo_caption()))
 , _emojiToggle(base::make_unique_q<Ui::EmojiButton>(
 	this,
-	st::boxAttachEmoji))
+	st::defaultComposeFiles.emoji))
 , _initialText(std::move(text))
 , _initialList(std::move(list))
 , _saved(std::move(saved)) {
@@ -402,6 +402,7 @@ void EditCaptionBox::rebuildPreview() {
 		if (photo || document->isVideoFile() || document->isAnimation()) {
 			const auto media = Ui::CreateChild<Ui::ItemSingleMediaPreview>(
 				this,
+				st::defaultComposeControls,
 				gifPaused,
 				_historyItem,
 				Ui::AttachControls::Type::EditOnly);
@@ -410,6 +411,7 @@ void EditCaptionBox::rebuildPreview() {
 		} else {
 			_content.reset(Ui::CreateChild<Ui::ItemSingleFilePreview>(
 				this,
+				st::defaultComposeControls,
 				_historyItem,
 				Ui::AttachControls::Type::EditOnly));
 		}
@@ -418,6 +420,7 @@ void EditCaptionBox::rebuildPreview() {
 
 		const auto media = Ui::SingleMediaPreview::Create(
 			this,
+			st::defaultComposeControls,
 			gifPaused,
 			file,
 			Ui::AttachControls::Type::EditOnly);
@@ -429,6 +432,7 @@ void EditCaptionBox::rebuildPreview() {
 		} else {
 			_content.reset(Ui::CreateChild<Ui::SingleFilePreview>(
 				this,
+				st::defaultComposeControls,
 				file,
 				Ui::AttachControls::Type::EditOnly));
 		}
@@ -466,8 +470,8 @@ void EditCaptionBox::rebuildPreview() {
 
 void EditCaptionBox::setupField() {
 	const auto peer = _historyItem->history()->peer;
-	const auto allow = [=](const auto&) {
-		return Data::AllowEmojiWithoutPremium(peer);
+	const auto allow = [=](not_null<DocumentData*> emoji) {
+		return Data::AllowEmojiWithoutPremium(peer, emoji);
 	};
 	InitMessageFieldHandlers(
 		_controller,
@@ -482,11 +486,18 @@ void EditCaptionBox::setupField() {
 
 	_field->setSubmitSettings(
 		Core::App().settings().sendSubmitWay());
-	_field->setMaxHeight(st::confirmCaptionArea.heightMax);
+	_field->setMaxHeight(st::defaultComposeFiles.caption.heightMax);
 
-	connect(_field, &Ui::InputField::submitted, [=] { save(); });
-	connect(_field, &Ui::InputField::cancelled, [=] { closeBox(); });
-	connect(_field, &Ui::InputField::resized, [=] { captionResized(); });
+	_field->submits(
+	) | rpl::start_with_next([=] { save(); }, _field->lifetime());
+	_field->cancelled(
+	) | rpl::start_with_next([=] {
+		closeBox();
+	}, _field->lifetime());
+	_field->heightChanges(
+	) | rpl::start_with_next([=] {
+		captionResized();
+	}, _field->lifetime());
 	_field->setMimeDataHook([=](
 			not_null<const QMimeData*> data,
 			Ui::InputField::MimeAction action) {
@@ -513,14 +524,16 @@ void EditCaptionBox::setInitialText() {
 	_field->setTextCursor(cursor);
 
 	_checkChangedTimer.setCallback([=] {
-		if (_field->getTextWithAppliedMarkdown() == _initialText) {
+		if (_field->getTextWithAppliedMarkdown() == _initialText
+			&& _preparedList.files.empty()) {
 			setCloseByOutsideClick(true);
 		}
 	});
-	connect(_field, &Ui::InputField::changed, [=] {
+	_field->changes(
+	) | rpl::start_with_next([=] {
 		_checkChangedTimer.callOnce(kChangesDebounceTimeout);
 		setCloseByOutsideClick(false);
-	});
+	}, _field->lifetime());
 }
 
 void EditCaptionBox::setupControls() {
@@ -596,7 +609,7 @@ void EditCaptionBox::setupPhotoEditorEventHandler() {
 		if (!_preparedList.files.empty()) {
 			Editor::OpenWithPreparedFile(
 				this,
-				controller,
+				controller->uiShow(),
 				&_preparedList.files.front(),
 				st::sendMediaPreviewSize,
 				[=] { rebuildPreview(); });
@@ -617,9 +630,10 @@ void EditCaptionBox::setupDragArea() {
 	};
 	// Avoid both drag areas appearing at one time.
 	auto computeState = [=](const QMimeData *data) {
+		using DragState = Storage::MimeDataState;
 		const auto state = Storage::ComputeMimeDataState(data);
-		return (state == Storage::MimeDataState::PhotoFiles)
-			? Storage::MimeDataState::Image
+		return (state == DragState::PhotoFiles || state == DragState::Image)
+			? (_asFile ? DragState::Files : DragState::Image)
 			: state;
 	};
 	const auto areas = DragArea::SetupDragAreaToContainer(
@@ -734,6 +748,7 @@ bool EditCaptionBox::setPreparedList(Ui::PreparedList &&list) {
 	const auto wasSpoiler = hasSpoiler();
 	_preparedList = std::move(list);
 	_preparedList.files.front().spoiler = wasSpoiler;
+	setCloseByOutsideClick(false);
 	rebuildPreview();
 	return true;
 }
@@ -845,7 +860,8 @@ bool EditCaptionBox::validateLength(const QString &text) const {
 	if (remove <= 0) {
 		return true;
 	}
-	_controller->show(Box(CaptionLimitReachedBox, session, remove));
+	_controller->show(
+		Box(CaptionLimitReachedBox, session, remove, nullptr));
 	return false;
 }
 

@@ -21,7 +21,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "boxes/premium_preview_box.h"
 #include "main/main_session.h"
-#include "settings/settings_common.h"
 #include "settings/settings_premium.h"
 #include "ui/chat/chat_style.h"
 #include "ui/chat/chat_theme.h"
@@ -33,6 +32,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/vertical_layout.h"
 #include "ui/animated_icon.h"
 #include "ui/painter.h"
+#include "ui/vertical_list.h"
 #include "window/section_widget.h"
 #include "window/window_session_controller.h"
 #include "styles/style_boxes.h"
@@ -62,7 +62,10 @@ PeerId GenerateUser(not_null<History*> history, const QString &name) {
 		MTPstring(), // bot placeholder
 		MTPstring(), // lang code
 		MTPEmojiStatus(),
-		MTPVector<MTPUsername>()));
+		MTPVector<MTPUsername>(),
+		MTPint(), // stories_max_id
+		MTPPeerColor(), // color
+		MTPPeerColor())); // profile_color
 	return peerId;
 }
 
@@ -70,17 +73,17 @@ AdminLog::OwnedItem GenerateItem(
 		not_null<HistoryView::ElementDelegate*> delegate,
 		not_null<History*> history,
 		PeerId from,
-		MsgId replyTo,
+		FullMsgId replyTo,
 		const QString &text) {
 	Expects(history->peer->isUser());
 
 	const auto item = history->addNewLocalMessage(
 		history->nextNonHistoryEntryId(),
-		MessageFlag::FakeHistoryItem
+		(MessageFlag::FakeHistoryItem
 			| MessageFlag::HasFromId
-			| MessageFlag::HasReplyInfo,
+			| MessageFlag::HasReplyInfo),
 		UserId(), // via
-		replyTo,
+		FullReplyTo{ .messageId = replyTo },
 		base::unixtime::now(), // date
 		from,
 		QString(), // postAuthor
@@ -102,7 +105,7 @@ void AddMessage(
 		object_ptr<Ui::RpWidget>(container),
 		style::margins(
 			0,
-			st::settingsSectionSkip,
+			st::defaultVerticalListSkip,
 			0,
 			st::settingsPrivacySkipTop));
 
@@ -130,7 +133,8 @@ void AddMessage(
 	state->delegate = std::make_unique<Delegate>(
 		controller,
 		crl::guard(widget, [=] { widget->update(); }));
-	state->style = std::make_unique<Ui::ChatStyle>();
+	state->style = std::make_unique<Ui::ChatStyle>(
+		controller->session().colorIndicesValue());
 	state->style->apply(controller->defaultChatTheme().get());
 	state->icons.lifetimes = std::vector<rpl::lifetime>(2);
 
@@ -142,13 +146,13 @@ void AddMessage(
 		GenerateUser(
 			history,
 			tr::lng_settings_chat_message_reply_from(tr::now)),
-		0,
+		FullMsgId(),
 		tr::lng_settings_chat_message_reply(tr::now));
 	auto message = GenerateItem(
 		state->delegate.get(),
 		history,
 		history->peer->id,
-		state->reply->data()->fullId().msg,
+		state->reply->data()->fullId(),
 		tr::lng_settings_chat_message(tr::now));
 	const auto view = message.get();
 	state->item = std::move(message);
@@ -482,7 +486,7 @@ void ReactionsSettingsBox(
 	auto idValue = state->selectedId.value();
 	AddMessage(pinnedToTop, controller, std::move(idValue), box->width());
 
-	Settings::AddSubsectionTitle(
+	Ui::AddSubsectionTitle(
 		pinnedToTop,
 		tr::lng_settings_chat_reactions_subtitle());
 
@@ -503,7 +507,6 @@ void ReactionsSettingsBox(
 	};
 
 	auto firstCheckedButton = (Ui::RpWidget*)(nullptr);
-	const auto premiumPossible = controller->session().premiumPossible();
 	auto list = reactions.list(Data::Reactions::Type::Active);
 	if (const auto favorite = reactions.favorite()) {
 		if (favorite->id.custom()) {
@@ -511,15 +514,10 @@ void ReactionsSettingsBox(
 		}
 	}
 	for (const auto &r : list) {
-		const auto button = Settings::AddButton(
+		const auto button = container->add(object_ptr<Ui::SettingsButton>(
 			container,
 			rpl::single<QString>(base::duplicate(r.title)),
-			st::settingsButton);
-
-		const auto premium = r.premium;
-		if (premium && !premiumPossible) {
-			continue;
-		}
+			st::settingsButton));
 
 		const auto iconSize = st::settingsReactionSize;
 		const auto left = button->st().iconLeft;
@@ -552,12 +550,6 @@ void ReactionsSettingsBox(
 				&button->lifetime());
 		}
 		button->setClickedCallback([=, id = r.id] {
-			if (premium && !controller->session().premium()) {
-				ShowPremiumPreviewBox(
-					controller,
-					PremiumPreview::InfiniteReactions);
-				return;
-			}
 			checkButton(button);
 			state->selectedId = id;
 		});

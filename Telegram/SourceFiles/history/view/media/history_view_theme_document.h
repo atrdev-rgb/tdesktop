@@ -46,7 +46,6 @@ public:
 		return true;
 	}
 	bool isReadyForOpen() const override;
-	QString additionalInfoString() const override;
 
 	bool hasHeavyPart() const override;
 	void unloadHeavyPart() override;
@@ -99,8 +98,8 @@ public:
 	int top() override;
 	QSize size() override;
 	QString title() override;
-	QString subtitle() override;
-	QString button() override;
+	TextWithEntities subtitle() override;
+	rpl::producer<QString> button() override;
 	void draw(
 		Painter &p,
 		const PaintContext &context,
@@ -120,8 +119,12 @@ public:
 	void unloadHeavyPart() override;
 
 private:
+	void createPreview(const Data::WallPaper &paper);
+
 	const not_null<Element*> _parent;
-	ThemeDocument _preview;
+	QString _emojiId;
+	std::optional<ThemeDocument> _preview;
+	rpl::lifetime _lifetime;
 
 };
 

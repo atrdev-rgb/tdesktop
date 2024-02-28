@@ -26,10 +26,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 #include "base/platform/base_platform_info.h"
-#include "base/platform/linux/base_linux_glibmm_helper.h"
 #include "base/event_filter.h"
+#include "ui/platform/ui_platform_window_title.h"
 #include "ui/widgets/popup_menu.h"
-#include "ui/widgets/input_fields.h"
+#include "ui/widgets/fields/input_field.h"
 #include "ui/ui_utility.h"
 
 #ifndef DESKTOP_APP_DISABLE_X11_INTEGRATION
@@ -40,6 +40,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QMimeData>
 #include <QtGui/QWindow>
 #include <QtWidgets/QMenuBar>
+#include <QtWidgets/QLineEdit>
+#include <QtWidgets/QTextEdit>
 
 #include <glibmm.h>
 #include <giomm.h>
@@ -118,9 +120,7 @@ void XCBSetDesktopFileName(QWindow *window) {
 		base::Platform::XCB::GetAtom(connection, "_KDE_NET_WM_DESKTOP_FILE"),
 	};
 
-	const auto filename = QGuiApplication::desktopFileName()
-		.chopped(8)
-		.toUtf8();
+	const auto filename = QGuiApplication::desktopFileName().toUtf8();
 
 	for (const auto atom : filenameAtoms) {
 		if (atom.has_value()) {
@@ -141,11 +141,13 @@ void XCBSetDesktopFileName(QWindow *window) {
 void SkipTaskbar(QWindow *window, bool skip) {
 	if (const auto integration = WaylandIntegration::Instance()) {
 		integration->skipTaskbar(window, skip);
+		return;
 	}
 
 #ifndef DESKTOP_APP_DISABLE_X11_INTEGRATION
 	if (IsX11()) {
 		XCBSkipTaskbar(window, skip);
+		return;
 	}
 #endif // !DESKTOP_APP_DISABLE_X11_INTEGRATION
 }
@@ -244,7 +246,8 @@ void MainWindow::updateUnityCounter() {
 
 	const auto launcherUrl = Glib::ustring(
 		"application://"
-			+ QGuiApplication::desktopFileName().toStdString());
+			+ QGuiApplication::desktopFileName().toStdString()
+			+ ".desktop");
 	const auto counterSlice = std::min(Core::App().unreadBadge(), 9999);
 	std::map<Glib::ustring, Glib::VariantBase> dbusUnityProperties;
 
@@ -252,13 +255,11 @@ void MainWindow::updateUnityCounter() {
 		// According to the spec, it should be of 'x' D-Bus signature,
 		// which corresponds to signed 64-bit integer
 		// https://wiki.ubuntu.com/Unity/LauncherAPI#Low_level_DBus_API:_com.canonical.Unity.LauncherEntry
-		dbusUnityProperties["count"] = Glib::Variant<int64>::create(
-			counterSlice);
-		dbusUnityProperties["count-visible"] =
-			Glib::Variant<bool>::create(true);
+		dbusUnityProperties["count"] = Glib::create_variant(
+			int64(counterSlice));
+		dbusUnityProperties["count-visible"] = Glib::create_variant(true);
 	} else {
-		dbusUnityProperties["count-visible"] =
-			Glib::Variant<bool>::create(false);
+		dbusUnityProperties["count-visible"] = Glib::create_variant(false);
 	}
 
 	try {
@@ -271,7 +272,7 @@ void MainWindow::updateUnityCounter() {
 			"com.canonical.Unity.LauncherEntry",
 			"Update",
 			{},
-			base::Platform::MakeGlibVariant(std::tuple{
+			Glib::create_variant(std::tuple{
 				launcherUrl,
 				dbusUnityProperties,
 			}));
@@ -371,6 +372,15 @@ void MainWindow::createGlobalMenu() {
 				Qt::ControlModifier | Qt::ShiftModifier);
 		},
 		Ui::kStrikeOutSequence);
+
+	psBlockquote = edit->addAction(
+		tr::lng_menu_formatting_blockquote(tr::now),
+		[] {
+			SendKeySequence(
+				Qt::Key_Period,
+				Qt::ControlModifier | Qt::ShiftModifier);
+		},
+		Ui::kBlockquoteSequence);
 
 	psMonospace = edit->addAction(
 		tr::lng_menu_formatting_monospace(tr::now),
@@ -533,6 +543,7 @@ void MainWindow::updateGlobalMenuHook() {
 	ForceDisabled(psItalic, !markdownEnabled);
 	ForceDisabled(psUnderline, !markdownEnabled);
 	ForceDisabled(psStrikeOut, !markdownEnabled);
+	ForceDisabled(psBlockquote, !markdownEnabled);
 	ForceDisabled(psMonospace, !markdownEnabled);
 	ForceDisabled(psClearFormat, !markdownEnabled);
 }

@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/power_save_blocker.h"
 #include "base/event_filter.h"
 #include "ui/platform/ui_platform_utility.h"
+#include "ui/platform/ui_platform_window_title.h"
 #include "ui/widgets/buttons.h"
 #include "ui/wrap/fade_wrap.h"
 #include "ui/widgets/shadow.h"
@@ -47,14 +48,6 @@ namespace {
 
 constexpr auto kPipLoaderPriority = 2;
 constexpr auto kMsInSecond = 1000;
-
-[[nodiscard]] bool IsWindowControlsOnLeft() {
-	using Control = Ui::Platform::TitleControls::Control;
-	const auto controlsLayout = Ui::Platform::TitleControlsLayout();
-	return ranges::contains(controlsLayout.left, Control::Close)
-		|| (controlsLayout.left.size() > controlsLayout.right.size()
-			&& !ranges::contains(controlsLayout.right, Control::Close));
-}
 
 [[nodiscard]] QRect ScreenFromPosition(QPoint point) {
 	const auto screen = QGuiApplication::screenAt(point);
@@ -521,8 +514,8 @@ void PipPanel::setPositionDefault() {
 		return widget->screen();
 	};
 	const auto parentScreen = widgetScreen(_parent);
-	const auto myScreen = widgetScreen(widget());
-	if (parentScreen && myScreen && myScreen != parentScreen) {
+	const auto myScreen = widget()->screen();
+	if (parentScreen && myScreen != parentScreen) {
 		widget()->windowHandle()->setScreen(parentScreen);
 	}
 	auto position = Position();
@@ -1265,7 +1258,7 @@ void Pip::setupButtons() {
 			rect.y(),
 			volumeToggleWidth,
 			volumeToggleHeight);
-		if (!IsWindowControlsOnLeft()) {
+		if (!Ui::Platform::TitleControlsOnLeft()) {
 			_close.area.moveLeft(rect.x()
 				+ rect.width()
 				- (_close.area.x() - rect.x())

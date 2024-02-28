@@ -31,7 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/clip/media_clip_reader.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/scroll_area.h"
-#include "ui/widgets/input_fields.h"
+#include "ui/widgets/fields/input_field.h"
 #include "ui/text/text_options.h"
 #include "ui/image/image.h"
 #include "ui/effects/path_shift_gradient.h"
@@ -69,6 +69,7 @@ public:
 
 	Inner(
 		std::shared_ptr<ChatHelpers::Show> show,
+		const style::EmojiPan &st,
 		not_null<FieldAutocomplete*> parent,
 		not_null<MentionRows*> mrows,
 		not_null<HashtagRows*> hrows,
@@ -126,11 +127,13 @@ private:
 
 	const std::shared_ptr<ChatHelpers::Show> _show;
 	const not_null<Main::Session*> _session;
+	const style::EmojiPan &_st;
 	const not_null<FieldAutocomplete*> _parent;
 	const not_null<MentionRows*> _mrows;
 	const not_null<HashtagRows*> _hrows;
 	const not_null<BotCommandRows*> _brows;
 	const not_null<StickerRows*> _srows;
+	Ui::RoundRect _overBg;
 	rpl::lifetime _stickersLifetime;
 	std::weak_ptr<Lottie::FrameRenderer> _lottieRenderer;
 	base::unique_qptr<Ui::PopupMenu> _menu;
@@ -192,10 +195,12 @@ FieldAutocomplete::FieldAutocomplete(
 
 FieldAutocomplete::FieldAutocomplete(
 	QWidget *parent,
-	std::shared_ptr<ChatHelpers::Show> show)
+	std::shared_ptr<ChatHelpers::Show> show,
+	const style::EmojiPan *stOverride)
 : RpWidget(parent)
 , _show(std::move(show))
 , _session(&_show->session())
+, _st(stOverride ? *stOverride : st::defaultEmojiPan)
 , _scroll(this) {
 	hide();
 
@@ -204,6 +209,7 @@ FieldAutocomplete::FieldAutocomplete(
 	_inner = _scroll->setOwnedWidget(
 		object_ptr<Inner>(
 			_show,
+			_st,
 			this,
 			&_mrows,
 			&_hrows,
@@ -285,7 +291,7 @@ void FieldAutocomplete::paintEvent(QPaintEvent *e) {
 		return;
 	}
 
-	p.fillRect(rect(), st::mentionBg);
+	p.fillRect(rect(), _st.bg);
 }
 
 void FieldAutocomplete::showFiltered(
@@ -325,7 +331,7 @@ void FieldAutocomplete::showFiltered(
 		plainQuery = base::StringViewMid(query, 1);
 		break;
 	}
-	bool resetScroll = (_type != type || _filter != plainQuery);
+	const auto resetScroll = (_type != type || _filter != plainQuery);
 	if (resetScroll) {
 		_type = type;
 		_filter = TextUtilities::RemoveAccents(plainQuery.toString());
@@ -336,10 +342,11 @@ void FieldAutocomplete::showFiltered(
 }
 
 void FieldAutocomplete::showStickers(EmojiPtr emoji) {
-	bool resetScroll = (_emoji != emoji);
-	_emoji = emoji;
-	_type = Type::Stickers;
-	if (!emoji) {
+	const auto resetScroll = (_emoji != emoji);
+	if (resetScroll || emoji) {
+		_emoji = emoji;
+		_type = Type::Stickers;
+	} else if (!emoji) {
 		rowsUpdated(
 			base::take(_mrows),
 			base::take(_hrows),
@@ -416,7 +423,9 @@ void FieldAutocomplete::updateFiltered(bool resetScroll) {
 		if (_chat) {
 			maxListSize += (_chat->participants.empty() ? _chat->lastAuthors.size() : _chat->participants.size());
 		} else if (_channel && _channel->isMegagroup()) {
-			if (!_channel->lastParticipantsRequestNeeded()) {
+			if (!_channel->canViewMembers()) {
+				maxListSize += _channel->mgInfo->admins.size();
+			} else if (!_channel->lastParticipantsRequestNeeded()) {
 				maxListSize += _channel->mgInfo->lastParticipants.size();
 			}
 		}
@@ -482,10 +491,22 @@ void FieldAutocomplete::updateFiltered(bool resetScroll) {
 				--i;
 				mrows.push_back({ i->second });
 			}
-		} else if (_channel
-			&& _channel->isMegagroup()
-			&& _channel->canViewMembers()) {
-			if (_channel->lastParticipantsRequestNeeded()) {
+		} else if (_channel && _channel->isMegagroup()) {
+			if (!_channel->canViewMembers()) {
+				if (!_channel->mgInfo->adminsLoaded) {
+					_channel->session().api().chatParticipants().requestAdmins(_channel);
+				} else {
+					mrows.reserve(mrows.size() + _channel->mgInfo->admins.size());
+					for (const auto &[userId, rank] : _channel->mgInfo->admins) {
+						if (const auto user = _channel->owner().userLoaded(userId)) {
+							if (user->isInaccessible()) continue;
+							if (!listAllSuggestions && filterNotPassedByName(user)) continue;
+							if (indexOfInFirstN(mrows, user, recentInlineBots) >= 0) continue;
+							mrows.push_back({ user });
+						}
+					}
+				}
+			} else if (_channel->lastParticipantsRequestNeeded()) {
 				_channel->session().api().chatParticipants().requestLast(
 					_channel);
 			} else {
@@ -679,6 +700,7 @@ void FieldAutocomplete::recount(bool resetScroll) {
 	} else if (!_brows.empty()) {
 		h = _brows.size() * st::mentionHeight;
 	}
+	h += _st.autocompleteBottomSkip;
 
 	if (_inner->width() != _boundings.width() || _inner->height() != h) {
 		_inner->resize(_boundings.width(), h);
@@ -686,9 +708,14 @@ void FieldAutocomplete::recount(bool resetScroll) {
 	if (h > _boundings.height()) h = _boundings.height();
 	if (h > maxh) h = maxh;
 	if (width() != _boundings.width() || height() != h) {
-		setGeometry(_boundings.x(), _boundings.y() + _boundings.height() - h, _boundings.width(), h);
+		setGeometry(
+			_boundings.x(),
+			_boundings.y() + _boundings.height() - h,
+			_boundings.width(),
+			h);
 		_scroll->resize(_boundings.width(), h);
-	} else if (y() != _boundings.y() + _boundings.height() - h) {
+	} else if (x() != _boundings.x()
+		|| y() != _boundings.y() + _boundings.height() - h) {
 		move(_boundings.x(), _boundings.y() + _boundings.height() - h);
 	}
 	if (resetScroll) st = 0;
@@ -817,6 +844,7 @@ bool FieldAutocomplete::eventFilter(QObject *obj, QEvent *e) {
 
 FieldAutocomplete::Inner::Inner(
 	std::shared_ptr<ChatHelpers::Show> show,
+	const style::EmojiPan &st,
 	not_null<FieldAutocomplete*> parent,
 	not_null<MentionRows*> mrows,
 	not_null<HashtagRows*> hrows,
@@ -824,14 +852,16 @@ FieldAutocomplete::Inner::Inner(
 	not_null<StickerRows*> srows)
 : _show(std::move(show))
 , _session(&_show->session())
+, _st(st)
 , _parent(parent)
 , _mrows(mrows)
 , _hrows(hrows)
 , _brows(brows)
 , _srows(srows)
+, _overBg(st::roundRadiusSmall, _st.overBg)
 , _pathGradient(std::make_unique<Ui::PathShiftGradient>(
-	st::windowBgRipple,
-	st::windowBgOver,
+	_st.pathBg,
+	_st.pathFg,
 	[=] { update(); }))
 , _premiumMark(_session)
 , _previewTimer([=] { showPreview(); }) {
@@ -900,7 +930,7 @@ void FieldAutocomplete::Inner::paintEvent(QPaintEvent *e) {
 				if (_sel == index) {
 					QPoint tl(pos);
 					if (rtl()) tl.setX(width() - tl.x() - st::stickerPanSize.width());
-					Ui::FillRoundRect(p, QRect(tl, st::stickerPanSize), st::emojiPanHover, Ui::StickerHoverCorners);
+					_overBg.paint(p, QRect(tl, st::stickerPanSize));
 				}
 
 				media->checkStickerSmall();
@@ -1366,8 +1396,10 @@ void FieldAutocomplete::Inner::setSel(int sel, bool scroll) {
 			int32 row = _sel / _stickersPerRow;
 			const auto padding = st::stickerPanPadding;
 			_scrollToRequested.fire({
-				padding + row * st::stickerPanSize.height(),
-				padding + (row + 1) * st::stickerPanSize.height() });
+				(row ? padding : 0) + row * st::stickerPanSize.height(),
+				(padding
+					+ (row + 1) * st::stickerPanSize.height()
+					+ _st.autocompleteBottomSkip) });
 		}
 	}
 }

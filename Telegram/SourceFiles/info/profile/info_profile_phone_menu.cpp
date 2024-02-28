@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/menu/menu_action.h"
 #include "ui/widgets/popup_menu.h"
 #include "styles/style_chat.h" // expandedMenuSeparator.
+#include "styles/style_chat_helpers.h"
 
 namespace Info {
 namespace Profile {
@@ -51,7 +52,7 @@ private:
 		return label->height();
 	};
 	auto widthMin = basicWidth;
-	auto widthMax = label->naturalWidth();
+	auto widthMax = label->textMaxWidth();
 	if (height(widthMin) <= heightLimit || height(widthMax) > heightLimit) {
 		return basicWidth;
 	}

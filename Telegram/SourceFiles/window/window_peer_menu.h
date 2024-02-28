@@ -32,6 +32,7 @@ class Thread;
 namespace Dialogs {
 class MainList;
 struct EntryState;
+struct UnreadState;
 } // namespace Dialogs
 
 namespace ChatHelpers {
@@ -69,7 +70,8 @@ void MenuAddMarkAsReadAllChatsAction(
 void MenuAddMarkAsReadChatListAction(
 	not_null<Window::SessionController*> controller,
 	Fn<not_null<Dialogs::MainList*>()> &&list,
-	const PeerMenuCallback &addAction);
+	const PeerMenuCallback &addAction,
+	Fn<Dialogs::UnreadState()> customUnreadState = nullptr);
 
 void PeerMenuExportChat(not_null<PeerData*> peer);
 void PeerMenuDeleteContact(
@@ -84,8 +86,7 @@ void PeerMenuAddChannelMembers(
 void PeerMenuCreatePoll(
 	not_null<Window::SessionController*> controller,
 	not_null<PeerData*> peer,
-	MsgId replyToId = 0,
-	MsgId topicRootId = 0,
+	FullReplyTo replyTo = FullReplyTo(),
 	PollData::Flags chosen = PollData::Flags(),
 	PollData::Flags disabled = PollData::Flags(),
 	Api::SendType sendType = Api::SendType::Normal,
@@ -115,7 +116,10 @@ void BlockSenderFromRepliesBox(
 	not_null<Window::SessionController*> controller,
 	FullMsgId id);
 
-void ToggleHistoryArchived(not_null<History*> history, bool archived);
+void ToggleHistoryArchived(
+	std::shared_ptr<ChatHelpers::Show> show,
+	not_null<History*> history,
+	bool archived);
 Fn<void()> ClearHistoryHandler(
 	not_null<Window::SessionController*> controller,
 	not_null<PeerData*> peer);

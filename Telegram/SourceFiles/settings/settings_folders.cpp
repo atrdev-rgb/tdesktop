@@ -22,15 +22,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "lottie/lottie_icon.h"
 #include "main/main_session.h"
-#include "settings/settings_common.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/filter_icons.h"
 #include "ui/layers/generic_box.h"
 #include "ui/painter.h"
+#include "ui/vertical_list.h"
 #include "ui/text/text_utilities.h"
 #include "ui/widgets/box_content_divider.h"
 #include "ui/widgets/buttons.h"
-#include "ui/widgets/input_fields.h"
+#include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/labels.h"
 #include "ui/wrap/slide_wrap.h"
 #include "window/window_controller.h"
@@ -39,7 +39,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
 #include "styles/style_chat_helpers.h"
-#include "styles/style_window.h"
 
 namespace Settings {
 namespace {
@@ -285,7 +284,7 @@ void FilterRowButton::paintEvent(QPaintEvent *e) {
 	}
 
 	const auto left = (_state == State::Suggested)
-		? st::settingsSubsectionTitlePadding.left()
+		? st::defaultSubsectionTitlePadding.left()
 		: st::settingsButtonActive.padding.left();
 	const auto buttonsLeft = std::min(
 		_add.x(),
@@ -342,8 +341,8 @@ void FilterRowButton::paintEvent(QPaintEvent *e) {
 	const auto limit = [=] {
 		return Data::PremiumLimits(session).dialogFiltersCurrent();
 	};
-	AddSkip(container, st::settingsSectionSkip);
-	AddSubsectionTitle(container, tr::lng_filters_subtitle());
+	Ui::AddSkip(container, st::defaultVerticalListSkip);
+	Ui::AddSubsectionTitle(container, tr::lng_filters_subtitle());
 
 	struct State {
 		std::vector<FilterRow> rows;
@@ -362,10 +361,11 @@ void FilterRowButton::paintEvent(QPaintEvent *e) {
 		const auto removed = ranges::count_if(
 			state->rows,
 			&FilterRow::removed);
-		if (state->rows.size() < limit() + removed) {
+		const auto count = int(state->rows.size() - removed);
+		if (count < limit()) {
 			return false;
 		}
-		controller->show(Box(FiltersLimitBox, session));
+		controller->show(Box(FiltersLimitBox, session, count));
 		return true;
 	};
 	const auto markForRemovalSure = [=](not_null<FilterRowButton*> button) {
@@ -539,11 +539,11 @@ void FilterRowButton::paintEvent(QPaintEvent *e) {
 		j->button->updateCount(j->filter);
 	}, container->lifetime());
 
-	AddButton(
+	AddButtonWithIcon(
 		container,
 		tr::lng_filters_create(),
 		st::settingsButtonActive,
-		{ &st::settingsIconAdd, 0, IconType::Round, &st::windowBgActive }
+		{ &st::settingsIconAdd, IconType::Round, &st::windowBgActive }
 	)->setClickedCallback([=] {
 		if (showLimitReached()) {
 			return;
@@ -570,16 +570,16 @@ void FilterRowButton::paintEvent(QPaintEvent *e) {
 			crl::guard(container, doneCallback),
 			crl::guard(container, saveAnd)));
 	});
-	AddSkip(container);
+	Ui::AddSkip(container);
 	const auto nonEmptyAbout = container->add(
 		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
 			container,
 			object_ptr<Ui::VerticalLayout>(container))
 	)->setDuration(0);
 	const auto aboutRows = nonEmptyAbout->entity();
-	AddDivider(aboutRows);
-	AddSkip(aboutRows);
-	AddSubsectionTitle(aboutRows, tr::lng_filters_recommended());
+	Ui::AddDivider(aboutRows);
+	Ui::AddSkip(aboutRows);
+	Ui::AddSubsectionTitle(aboutRows, tr::lng_filters_recommended());
 
 	rpl::single(rpl::empty) | rpl::then(
 		session->data().chatsFilters().suggestedUpdated()
@@ -612,7 +612,7 @@ void FilterRowButton::paintEvent(QPaintEvent *e) {
 			}, button->lifetime());
 		}
 		aboutRows->resizeToWidth(container->width());
-		AddSkip(aboutRows, st::settingsSectionSkip);
+		Ui::AddSkip(aboutRows, st::defaultVerticalListSkip);
 	}, aboutRows->lifetime());
 
 	auto showSuggestions = rpl::combine(

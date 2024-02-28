@@ -7,16 +7,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/peer_list_box.h"
 
+#include "history/history.h" // chatListNameSortKey.
 #include "main/session/session_show.h"
 #include "main/main_session.h"
 #include "mainwidget.h"
+#include "ui/effects/loading_element.h"
+#include "ui/effects/outline_segments.h"
+#include "ui/effects/round_checkbox.h"
+#include "ui/effects/ripple_animation.h"
 #include "ui/widgets/multi_select.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/scroll_area.h"
 #include "ui/widgets/popup_menu.h"
-#include "ui/effects/loading_element.h"
-#include "ui/effects/round_checkbox.h"
-#include "ui/effects/ripple_animation.h"
 #include "ui/empty_userpic.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/text/text_options.h"
@@ -33,7 +35,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_dialogs.h"
 #include "styles/style_widgets.h"
 
-#include <rpl/range.h>
+#include <xxhash.h> // XXH64.
+
+[[nodiscard]] PeerListRowId UniqueRowIdFromString(const QString &d) {
+	return XXH64(d.data(), d.size() * sizeof(ushort), 0);
+}
 
 PaintRoundImageCallback PaintUserpicCallback(
 		not_null<PeerData*> peer,
@@ -77,16 +83,6 @@ PaintRoundImageCallback ForceRoundUserpicCallback(not_null<PeerData*> peer) {
 PeerListContentDelegateShow::PeerListContentDelegateShow(
 	std::shared_ptr<Main::SessionShow> show)
 : _show(show) {
-}
-
-void PeerListContentDelegateShow::peerListShowBox(
-		object_ptr<Ui::BoxContent> content,
-		Ui::LayerOptions options) {
-	_show->showBox(std::move(content), options);
-}
-
-void PeerListContentDelegateShow::peerListHideLayer() {
-	_show->hideLayer();
 }
 
 auto PeerListContentDelegateShow::peerListUiShow()
@@ -236,9 +232,7 @@ void PeerListBox::resizeEvent(QResizeEvent *e) {
 void PeerListBox::paintEvent(QPaintEvent *e) {
 	auto p = QPainter(this);
 
-	const auto &bg = (_controller->listSt()
-		? *_controller->listSt()
-		: st::peerListBox).bg;
+	const auto &bg = _controller->computeListSt().bg;
 	const auto fill = QRect(
 		0,
 		_addedTopScrollSkip,
@@ -263,15 +257,23 @@ void PeerListBox::peerListSetRowChecked(
 		not_null<PeerListRow*> row,
 		bool checked) {
 	if (checked) {
-		addSelectItem(row, anim::type::normal);
+		if (_controller->trackSelectedList()) {
+			addSelectItem(row, anim::type::normal);
+		}
 		PeerListContentDelegate::peerListSetRowChecked(row, checked);
 		peerListUpdateRow(row);
 
 		// This call deletes row from _searchRows.
-		_select->entity()->clearQuery();
+		if (_select) {
+			_select->entity()->clearQuery();
+		}
 	} else {
 		// The itemRemovedCallback will call changeCheckState() here.
-		_select->entity()->removeItem(row->id());
+		if (_select) {
+			_select->entity()->removeItem(row->id());
+		} else {
+			PeerListContentDelegate::peerListSetRowChecked(row, checked);
+		}
 		peerListUpdateRow(row);
 	}
 }
@@ -308,16 +310,6 @@ void PeerListBox::peerListSetSearchMode(PeerListSearchMode mode) {
 		_scrollBottomFixed = false;
 		setInnerFocus();
 	}
-}
-
-void PeerListBox::peerListShowBox(
-		object_ptr<Ui::BoxContent> content,
-		Ui::LayerOptions options) {
-	_show->showBox(std::move(content), options);
-}
-
-void PeerListBox::peerListHideLayer() {
-	_show->hideLayer();
 }
 
 std::shared_ptr<Main::SessionShow> PeerListBox::peerListUiShow() {
@@ -389,6 +381,27 @@ void PeerListController::setSearchNoResultsText(const QString &text) {
 	}
 }
 
+void PeerListController::sortByName() {
+	auto keys = base::flat_map<PeerListRowId, QString>();
+	keys.reserve(delegate()->peerListFullRowsCount());
+	const auto key = [&](const PeerListRow &row) {
+		const auto id = row.id();
+		const auto i = keys.find(id);
+		if (i != end(keys)) {
+			return i->second;
+		}
+		const auto peer = row.peer();
+		const auto history = peer->owner().history(peer);
+		return keys.emplace(
+			id,
+			history->chatListNameSortKey()).first->second;
+	};
+	const auto predicate = [&](const PeerListRow &a, const PeerListRow &b) {
+		return (key(a).compare(key(b)) < 0);
+	};
+	delegate()->peerListSortRows(predicate);
+}
+
 base::unique_qptr<Ui::PopupMenu> PeerListController::rowContextMenu(
 		QWidget *parent,
 		not_null<PeerListRow*> row) {
@@ -427,7 +440,7 @@ int PeerListController::descriptionTopSkipMin() const {
 void PeerListBox::addSelectItem(
 		not_null<PeerData*> peer,
 		anim::type animated) {
-	const auto respect = _controller->respectSavedMessagesChat();
+	const auto respect = !_controller->savedMessagesChatStatus().isEmpty();
 	const auto text = (respect && peer->isSelf())
 		? tr::lng_saved_short(tr::now)
 		: (respect && peer->isRepliesChat())
@@ -529,6 +542,12 @@ bool PeerListRow::checked() const {
 	return _checkbox && _checkbox->checked();
 }
 
+void PeerListRow::preloadUserpic() {
+	if (_peer) {
+		_peer->loadUserpic();
+	}
+}
+
 void PeerListRow::setCustomStatus(const QString &status, bool active) {
 	setStatusText(status);
 	_statusType = active ? StatusType::CustomActive : StatusType::Custom;
@@ -550,8 +569,8 @@ void PeerListRow::refreshStatus() {
 	_statusType = StatusType::LastSeen;
 	_statusValidTill = 0;
 	if (auto user = peer()->asUser()) {
-		if (_isSavedMessagesChat) {
-			setStatusText(tr::lng_saved_forward_here(tr::now));
+		if (!_savedMessagesStatus.isEmpty()) {
+			setStatusText(_savedMessagesStatus);
 		} else {
 			auto time = base::unixtime::now();
 			setStatusText(Data::OnlineText(user, time));
@@ -584,7 +603,7 @@ void PeerListRow::refreshName(const style::PeerListItem &st) {
 	if (!_initialized) {
 		return;
 	}
-	const auto text = _isSavedMessagesChat
+	const auto text = !_savedMessagesStatus.isEmpty()
 		? tr::lng_saved_messages(tr::now)
 		: _isRepliesMessagesChat
 		? tr::lng_replies_messages(tr::now)
@@ -654,7 +673,7 @@ QString PeerListRow::generateName() {
 }
 
 QString PeerListRow::generateShortName() {
-	return _isSavedMessagesChat
+	return !_savedMessagesStatus.isEmpty()
 		? tr::lng_saved_short(tr::now)
 		: _isRepliesMessagesChat
 		? tr::lng_replies_messages(tr::now)
@@ -670,7 +689,7 @@ Ui::PeerUserpicView &PeerListRow::ensureUserpicView() {
 
 PaintRoundImageCallback PeerListRow::generatePaintUserpicCallback(
 		bool forceRound) {
-	const auto saved = _isSavedMessagesChat;
+	const auto saved = !_savedMessagesStatus.isEmpty();
 	const auto replies = _isRepliesMessagesChat;
 	const auto peer = this->peer();
 	auto userpic = saved ? Ui::PeerUserpicView() : ensureUserpicView();
@@ -716,7 +735,9 @@ int PeerListRow::paintNameIconGetWidth(
 		int availableWidth,
 		int outerWidth,
 		bool selected) {
-	if (special() || _isSavedMessagesChat || _isRepliesMessagesChat) {
+	if (special()
+		|| !_savedMessagesStatus.isEmpty()
+		|| _isRepliesMessagesChat) {
 		return 0;
 	}
 	return _bagde.drawGetWidth(
@@ -729,13 +750,13 @@ int PeerListRow::paintNameIconGetWidth(
 		nameWidth,
 		outerWidth,
 		{
-			.peer = _peer,
+			.peer = peer(),
 			.verified = &(selected
 				? st::dialogsVerifiedIconOver
 				: st::dialogsVerifiedIcon),
 			.premium = &(selected
-				? st::dialogsPremiumIconOver
-				: st::dialogsPremiumIcon),
+				? st::dialogsPremiumIcon.over
+				: st::dialogsPremiumIcon.icon),
 			.scam = &(selected ? st::dialogsScamFgOver : st::dialogsScamFg),
 			.premiumFg = &(selected
 				? st::dialogsVerifiedIconBgOver
@@ -826,7 +847,7 @@ void PeerListRow::paintDisabledCheckUserpic(
 	auto iconBorderPen = st.checkbox.check.border->p;
 	iconBorderPen.setWidth(st.checkbox.selectWidth);
 
-	if (_isSavedMessagesChat) {
+	if (!_savedMessagesStatus.isEmpty()) {
 		Ui::EmptyUserpic::PaintSavedMessages(p, userpicLeft, userpicTop, outerWidth, userpicRadius * 2);
 	} else if (_isRepliesMessagesChat) {
 		Ui::EmptyUserpic::PaintRepliesMessages(p, userpicLeft, userpicTop, outerWidth, userpicRadius * 2);
@@ -882,9 +903,18 @@ void PeerListRow::createCheckbox(
 }
 
 void PeerListRow::setCheckedInternal(bool checked, anim::type animated) {
+	Expects(!checked || _checkbox != nullptr);
+
+	if (_checkbox) {
+		_checkbox->setChecked(checked, animated);
+	}
+}
+
+void PeerListRow::setCustomizedCheckSegments(
+		std::vector<Ui::OutlineSegment> segments) {
 	Expects(_checkbox != nullptr);
 
-	_checkbox->setChecked(checked, animated);
+	_checkbox->setCustomizedSegments(std::move(segments));
 }
 
 void PeerListRow::finishCheckedAnimation() {
@@ -1008,9 +1038,10 @@ void PeerListContent::setRowHidden(not_null<PeerListRow*> row, bool hidden) {
 }
 
 void PeerListContent::addRowEntry(not_null<PeerListRow*> row) {
-	if (_controller->respectSavedMessagesChat() && !row->special()) {
+	const auto savedMessagesStatus = _controller->savedMessagesChatStatus();
+	if (!savedMessagesStatus.isEmpty() && !row->special()) {
 		if (row->peer()->isSelf()) {
-			row->setIsSavedMessagesChat(true);
+			row->setSavedMessagesChatStatus(savedMessagesStatus);
 		} else if (row->peer()->isRepliesChat()) {
 			row->setIsRepliesMessagesChat(true);
 		}
@@ -1126,6 +1157,24 @@ PeerListRow *PeerListContent::findRow(PeerListRowId id) {
 	return (it == _rowsById.cend()) ? nullptr : it->second.get();
 }
 
+std::optional<QPoint> PeerListContent::lastRowMousePosition() const {
+	if (!_lastMousePosition) {
+		return std::nullopt;
+	}
+	const auto point = mapFromGlobal(*_lastMousePosition);
+	auto in = parentWidget()->rect().contains(
+		parentWidget()->mapFromGlobal(*_lastMousePosition));
+	auto rowsPointY = point.y() - rowsTop();
+	const auto index = (in
+		&& rowsPointY >= 0
+		&& rowsPointY < shownRowsCount() * _rowHeight)
+		? (rowsPointY / _rowHeight)
+		: -1;
+	return (index >= 0 && index == _selected.index.value)
+		? QPoint(point.x(), rowsPointY)
+		: std::optional<QPoint>();
+}
+
 void PeerListContent::removeRow(not_null<PeerListRow*> row) {
 	auto index = row->absoluteIndex();
 	auto isSearchResult = row->isSearchResult();
@@ -1204,6 +1253,16 @@ not_null<PeerListRow*> PeerListContent::rowAt(int index) const {
 	return _rows[index].get();
 }
 
+int PeerListContent::searchRowsCount() const {
+	return _searchRows.size();
+}
+
+not_null<PeerListRow*> PeerListContent::searchRowAt(int index) const {
+	Expects(index >= 0 && index < _searchRows.size());
+
+	return _searchRows[index].get();
+}
+
 void PeerListContent::setDescription(object_ptr<Ui::FlatLabel> description) {
 	_description = std::move(description);
 	if (_description) {
@@ -1254,6 +1313,9 @@ void PeerListContent::initDecorateWidget(Ui::RpWidget *widget) {
 		}) | rpl::start_with_next([=] {
 			mouseLeftGeometry();
 		}, widget->lifetime());
+		widget->heightValue() | rpl::skip(1) | rpl::start_with_next([=] {
+			resizeToWidth(width());
+		}, widget->lifetime());
 	}
 }
 
@@ -1295,6 +1357,7 @@ void PeerListContent::refreshRows() {
 	if (_mouseSelection) {
 		selectByMouse(QCursor::pos());
 	}
+	loadProfilePhotos();
 	update();
 }
 
@@ -1634,9 +1697,19 @@ crl::time PeerListContent::paintRow(
 		return refreshStatusIn;
 	}
 
+	const auto opacity = row->opacity();
 	const auto &bg = selected
 		? _st.item.button.textBgOver
 		: _st.item.button.textBg;
+	if (opacity < 1.) {
+		p.setOpacity(opacity);
+	}
+	const auto guard = gsl::finally([&] {
+		if (opacity < 1.) {
+			p.setOpacity(1.);
+		}
+	});
+
 	p.fillRect(0, 0, outerWidth, _rowHeight, bg);
 	row->paintRipple(p, 0, 0, outerWidth);
 	row->paintUserpic(
@@ -1839,7 +1912,9 @@ void PeerListContent::mouseLeftGeometry() {
 }
 
 void PeerListContent::loadProfilePhotos() {
-	if (_visibleTop >= _visibleBottom) return;
+	if (_visibleTop >= _visibleBottom) {
+		return;
+	}
 
 	auto yFrom = _visibleTop;
 	auto yTo = _visibleBottom + (_visibleBottom - _visibleTop) * PreloadHeightsCount;
@@ -1856,10 +1931,7 @@ void PeerListContent::loadProfilePhotos() {
 			if (to > rowsCount) to = rowsCount;
 
 			for (auto index = from; index != to; ++index) {
-				const auto row = getRow(RowIndex(index));
-				if (!row->special()) {
-					row->peer()->loadUserpic();
-				}
+				getRow(RowIndex(index))->preloadUserpic();
 			}
 		}
 	}
@@ -1990,10 +2062,12 @@ void PeerListContent::setSearchQuery(
 
 bool PeerListContent::submitted() {
 	if (const auto row = getRow(_selected.index)) {
+		_lastMousePosition = std::nullopt;
 		_controller->rowClicked(row);
 		return true;
 	} else if (showingSearch()) {
 		if (const auto row = getRow(RowIndex(0))) {
+			_lastMousePosition = std::nullopt;
 			_controller->rowClicked(row);
 			return true;
 		}

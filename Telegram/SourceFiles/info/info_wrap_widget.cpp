@@ -60,8 +60,8 @@ const style::InfoTopBar &TopBarStyle(Wrap wrap) {
 
 [[nodiscard]] bool HasCustomTopBar(not_null<const Controller*> controller) {
 	const auto section = controller->section();
-	return (section.type() == Section::Type::Settings
-		&& (section.settingsType() == ::Settings::PremiumId()));
+	return (section.type() == Section::Type::Settings)
+		&& section.settingsType()->hasCustomTopBar();
 }
 
 } // namespace
@@ -188,23 +188,32 @@ void WrapWidget::injectActivePeerProfile(not_null<PeerData*> peer) {
 		? _historyStack.front().section->section().type()
 		: _controller->section().type();
 	const auto firstSectionMediaType = [&] {
-		if (firstSectionType == Section::Type::Profile) {
+		if (firstSectionType == Section::Type::Profile
+			|| firstSectionType == Section::Type::SavedSublists) {
 			return Section::MediaType::kCount;
 		}
 		return hasStackHistory()
 			? _historyStack.front().section->section().mediaType()
 			: _controller->section().mediaType();
 	}();
-	const auto expectedType = peer->sharedMediaInfo()
+	const auto savedSublistsInfo = peer->savedSublistsInfo();
+	const auto sharedMediaInfo = peer->sharedMediaInfo();
+	const auto expectedType = savedSublistsInfo
+		? Section::Type::SavedSublists
+		: sharedMediaInfo
 		? Section::Type::Media
 		: Section::Type::Profile;
-	const auto expectedMediaType = peer->sharedMediaInfo()
+	const auto expectedMediaType = savedSublistsInfo
+		? Section::MediaType::kCount
+		: sharedMediaInfo
 		? Section::MediaType::Photo
 		: Section::MediaType::kCount;
 	if (firstSectionType != expectedType
 		|| firstSectionMediaType != expectedMediaType
 		|| firstPeer != peer) {
-		auto section = peer->sharedMediaInfo()
+		auto section = savedSublistsInfo
+			? Section(Section::Type::SavedSublists)
+			: sharedMediaInfo
 			? Section(Section::MediaType::Photo)
 			: Section(Section::Type::Profile);
 		injectActiveProfileMemento(std::move(
@@ -244,7 +253,16 @@ Dialogs::RowDescriptor WrapWidget::activeChat() const {
 		return Dialogs::RowDescriptor(
 			peer->owner().history(peer),
 			FullMsgId());
-	} else if (key().settingsSelf() || key().isDownloads() || key().poll()) {
+	} else if (const auto storiesPeer = key().storiesPeer()) {
+		return (key().storiesTab() == Stories::Tab::Saved)
+			? Dialogs::RowDescriptor(
+				storiesPeer->owner().history(storiesPeer),
+				FullMsgId())
+			: Dialogs::RowDescriptor();
+	} else if (key().settingsSelf()
+			|| key().isDownloads()
+			|| key().poll()
+			|| key().statisticsPeer()) {
 		return Dialogs::RowDescriptor();
 	}
 	Unexpected("Owner in WrapWidget::activeChat().");
@@ -297,6 +315,11 @@ void WrapWidget::createTopBar() {
 			_controller->parentController()->closeThirdSection();
 		});
 	}
+	_topBar->storyClicks() | rpl::start_with_next([=] {
+		if (const auto peer = _controller->key().peer()) {
+			_controller->parentController()->openPeerStories(peer->id);
+		}
+	}, _topBar->lifetime());
 	if (wrapValue == Wrap::Layer) {
 		auto close = _topBar->addButton(
 			base::make_unique_q<Ui::IconButton>(
@@ -531,6 +554,8 @@ void WrapWidget::removeFromStack(const std::vector<Section> &sections) {
 			const auto &s = item.section->section();
 			if (s.type() != section.type()) {
 				return false;
+			} else if (s.type() == Section::Type::SavedSublists) {
+				return true;
 			} else if (s.type() == Section::Type::Media) {
 				return (s.mediaType() == section.mediaType());
 			} else if (s.type() == Section::Type::Settings) {
@@ -572,7 +597,13 @@ void WrapWidget::finishShowContent() {
 	updateContentGeometry();
 	_content->setIsStackBottom(!hasStackHistory());
 	if (_topBar) {
-		_topBar->setTitle(_content->title());
+		_topBar->setTitle({
+			.title = _content->title(),
+			.subtitle = _content->subtitle(),
+		});
+		_topBar->setStories(_content->titleStories());
+		_topBar->setStoriesArchive(
+			_controller->key().storiesTab() == Stories::Tab::Archive);
 	}
 	_desiredHeights.fire(desiredHeightForContent());
 	_desiredShadowVisibilities.fire(_content->desiredShadowVisibility());
@@ -771,8 +802,8 @@ void WrapWidget::showNewContent(
 		newController->takeStepData(_controller.get());
 	}
 	auto newContent = object_ptr<ContentWidget>(nullptr);
-	const auto enableBackButton = hasBackButton();
-	const auto createInAdvance = needAnimation || enableBackButton;
+	const auto withBackButton = willHaveBackButton(params);
+	const auto createInAdvance = needAnimation || withBackButton;
 	if (createInAdvance) {
 		newContent = createContent(memento, newController.get());
 	}
@@ -806,7 +837,7 @@ void WrapWidget::showNewContent(
 		_historyStack.clear();
 	}
 
-	if (enableBackButton) {
+	if (withBackButton) {
 		newContent->enableBackButton();
 	}
 
@@ -950,6 +981,17 @@ const Ui::RoundRect *WrapWidget::bottomSkipRounding() const {
 
 bool WrapWidget::hasBackButton() const {
 	return (wrap() == Wrap::Narrow || hasStackHistory());
+}
+
+bool WrapWidget::willHaveBackButton(
+		const Window::SectionShow &params) const {
+	using Way = Window::SectionShow::Way;
+	const auto willSaveToStack = (_content != nullptr)
+		&& (params.way == Way::Forward);
+	const auto willClearStack = (params.way == Way::ClearStack);
+	const auto willHaveStack = !willClearStack
+		&& (hasStackHistory() || willSaveToStack);
+	return (wrap() == Wrap::Narrow) || willHaveStack;
 }
 
 WrapWidget::~WrapWidget() = default;

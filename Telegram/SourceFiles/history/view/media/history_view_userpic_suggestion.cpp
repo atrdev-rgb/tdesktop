@@ -203,16 +203,16 @@ QString UserpicSuggestion::title() {
 	return QString();
 }
 
-QString UserpicSuggestion::button() {
+rpl::producer<QString> UserpicSuggestion::button() {
 	return _photo.getPhoto()->hasVideo()
 		? (_photo.parent()->data()->out()
-			? tr::lng_action_suggested_video_button(tr::now)
-			: tr::lng_profile_set_video_button(tr::now))
-		: tr::lng_action_suggested_photo_button(tr::now);
+			? tr::lng_action_suggested_video_button()
+			: tr::lng_profile_set_video_button())
+		: tr::lng_action_suggested_photo_button();
 }
 
-QString UserpicSuggestion::subtitle() {
-	return _photo.parent()->data()->notificationText().text;
+TextWithEntities UserpicSuggestion::subtitle() {
+	return _photo.parent()->data()->notificationText();
 }
 
 ClickHandlerPtr UserpicSuggestion::createViewLink() {

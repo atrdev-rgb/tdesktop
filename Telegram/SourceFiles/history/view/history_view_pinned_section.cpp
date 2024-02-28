@@ -46,6 +46,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "platform/platform_specific.h"
 #include "lang/lang_keys.h"
 #include "styles/style_chat.h"
+#include "styles/style_chat_helpers.h"
 #include "styles/style_window.h"
 #include "styles/style_info.h"
 #include "styles/style_boxes.h"
@@ -261,7 +262,7 @@ void PinnedWidget::showAtPosition(
 		FullMsgId originId) {
 	_inner->showAtPosition(
 		position,
-		anim::type::normal,
+		{},
 		_cornerButtons.doneJumpFrom(position.fullId, originId));
 }
 
@@ -345,7 +346,7 @@ void PinnedWidget::restoreState(not_null<PinnedMemento*> memento) {
 				? FullMsgId(_history->peer->id, highlight)
 				: FullMsgId(_migratedPeer->id, -highlight)),
 			.date = TimeId(0),
-		}, anim::type::instant);
+		}, { Window::SectionShow::Way::Forward, anim::type::instant });
 	}
 }
 
@@ -496,6 +497,9 @@ void PinnedWidget::listDeleteRequest() {
 	confirmDeleteSelected();
 }
 
+void PinnedWidget::listTryProcessKeyInput(not_null<QKeyEvent*> e) {
+}
+
 rpl::producer<Data::MessagesSlice> PinnedWidget::listSource(
 		Data::MessagePosition aroundId,
 		int limitBefore,
@@ -593,7 +597,11 @@ void PinnedWidget::listUpdateDateLink(
 }
 
 bool PinnedWidget::listElementHideReply(not_null<const Element*> view) {
-	return (view->data()->replyToId() == _thread->topicRootId());
+	if (const auto reply = view->data()->Get<HistoryMessageReply>()) {
+		return !reply->fields().manualQuote
+			&& (reply->messageId() == _thread->topicRootId());
+	}
+	return false;
 }
 
 bool PinnedWidget::listElementShownUnread(not_null<const Element*> view) {
@@ -608,6 +616,15 @@ bool PinnedWidget::listIsGoodForAroundPosition(
 void PinnedWidget::listSendBotCommand(
 	const QString &command,
 	const FullMsgId &context) {
+}
+
+void PinnedWidget::listSearch(
+		const QString &query,
+		const FullMsgId &context) {
+	const auto inChat = _history->peer->isUser()
+		? Dialogs::Key()
+		: Dialogs::Key(_history);
+	controller()->searchMessages(query, inChat);
 }
 
 void PinnedWidget::listHandleViaClick(not_null<UserData*> bot) {
@@ -642,14 +659,14 @@ void PinnedWidget::listShowPremiumToast(not_null<DocumentData*> document) {
 void PinnedWidget::listOpenPhoto(
 		not_null<PhotoData*> photo,
 		FullMsgId context) {
-	controller()->openPhoto(photo, context, MsgId());
+	controller()->openPhoto(photo, { context });
 }
 
 void PinnedWidget::listOpenDocument(
 		not_null<DocumentData*> document,
 		FullMsgId context,
 		bool showInMediaView) {
-	controller()->openDocument(document, context, MsgId(), showInMediaView);
+	controller()->openDocument(document, showInMediaView, { context });
 }
 
 void PinnedWidget::listPaintEmpty(

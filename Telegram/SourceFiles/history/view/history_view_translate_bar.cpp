@@ -284,7 +284,7 @@ void TranslateBar::setup(not_null<History*> history) {
 
 	button->paintRequest(
 	) | rpl::start_with_next([=](QRect clip) {
-		QPainter(button).fillRect(clip, st::historyComposeButton.bgColor);
+		QPainter(button).fillRect(clip, st::historyComposeButtonBg);
 	}, button->lifetime());
 
 	button->setClickedCallback([=] {
@@ -310,7 +310,7 @@ void TranslateBar::setup(not_null<History*> history) {
 	const auto updateLabelGeometry = [=] {
 		const auto full = _wrap.width() - icon->width();
 		const auto skip = st::semiboldFont->spacew * 2;
-		const auto natural = label->naturalWidth();
+		const auto natural = label->textMaxWidth();
 		const auto top = [&] {
 			return (_wrap.height() - label->height()) / 2;
 		};

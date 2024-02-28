@@ -50,7 +50,7 @@ public:
 	void setFinalImages(Direction direction, QImage &&left, QImage &&right, QRect inner, bool wasSectionIcons);
 
 	void start();
-	void paintFrame(QPainter &p, float64 dt, float64 opacity);
+	void paintFrame(QPainter &p, const style::EmojiPan &st, float64 dt, float64 opacity);
 
 private:
 	Direction _direction = Direction::LeftToRight;
@@ -131,7 +131,11 @@ void TabbedSelector::SlideAnimation::start() {
 	_frameIntsPerLineAdd = (_width - _innerWidth) + _frameIntsPerLineAdded;
 }
 
-void TabbedSelector::SlideAnimation::paintFrame(QPainter &p, float64 dt, float64 opacity) {
+void TabbedSelector::SlideAnimation::paintFrame(
+		QPainter &p,
+		const style::EmojiPan &st,
+		float64 dt,
+		float64 opacity) {
 	Expects(started());
 	Expects(dt >= 0.);
 
@@ -168,8 +172,8 @@ void TabbedSelector::SlideAnimation::paintFrame(QPainter &p, float64 dt, float64
 	{
 		auto p = QPainter(&_frame);
 		p.setOpacity(opacity);
-		p.fillRect(_painterInnerLeft, _painterInnerTop, _painterInnerWidth, _painterCategoriesTop - _painterInnerTop, st::emojiPanBg);
-		p.fillRect(_painterInnerLeft, _painterCategoriesTop, _painterInnerWidth, _painterInnerBottom - _painterCategoriesTop, _wasSectionIcons ? st::emojiPanCategories : st::emojiPanBg);
+		p.fillRect(_painterInnerLeft, _painterInnerTop, _painterInnerWidth, _painterCategoriesTop - _painterInnerTop, st.bg);
+		p.fillRect(_painterInnerLeft, _painterCategoriesTop, _painterInnerWidth, _painterInnerBottom - _painterCategoriesTop, _wasSectionIcons ? st.categoriesBg : st.bg);
 		p.setCompositionMode(QPainter::CompositionMode_SourceOver);
 		if (leftTo > _innerLeft) {
 			p.setOpacity(opacity * leftAlpha);
@@ -325,11 +329,31 @@ TabbedSelector::TabbedSelector(
 	std::shared_ptr<Show> show,
 	PauseReason level,
 	Mode mode)
+: TabbedSelector(parent, {
+	.show = std::move(show),
+	.st = ((mode == Mode::EmojiStatus
+		|| mode == Mode::ChannelStatus
+		|| mode == Mode::BackgroundEmoji
+		|| mode == Mode::FullReactions)
+		? st::statusEmojiPan
+		: (mode == Mode::RecentReactions)
+		? st::backgroundEmojiPan
+		: st::defaultEmojiPan),
+	.level = level,
+	.mode = mode,
+}) {
+}
+
+TabbedSelector::TabbedSelector(
+	QWidget *parent,
+	TabbedSelectorDescriptor &&descriptor)
 : RpWidget(parent)
-, _st((mode == Mode::EmojiStatus) ? st::statusEmojiPan : st::defaultEmojiPan)
-, _show(std::move(show))
-, _level(level)
-, _mode(mode)
+, _st(descriptor.st)
+, _features(descriptor.features)
+, _show(std::move(descriptor.show))
+, _level(descriptor.level)
+, _customTextColor(std::move(descriptor.customTextColor))
+, _mode(descriptor.mode)
 , _panelRounding(Ui::PrepareCornerPixmaps(st::emojiPanRadius, _st.bg))
 , _categoriesRounding(
 	Ui::PrepareCornerPixmaps(st::emojiPanRadius, _st.categoriesBg))
@@ -366,7 +390,11 @@ TabbedSelector::TabbedSelector(
 	resize(st::emojiPanWidth, st::emojiPanMaxHeight);
 
 	for (auto &tab : _tabs) {
-		tab.footer()->hide();
+		if (tab.hasFooter()) {
+			tab.footer()->hide();
+		} else {
+			_noFooter = true;
+		}
 		tab.widget()->hide();
 	}
 	if (tabbed()) {
@@ -445,10 +473,10 @@ TabbedSelector::TabbedSelector(
 	) | rpl::start_with_next([=] {
 		_panelRounding = Ui::PrepareCornerPixmaps(
 			st::emojiPanRadius,
-			st::emojiPanBg);
+			_st.bg);
 		_categoriesRounding = Ui::PrepareCornerPixmaps(
 			st::emojiPanRadius,
-			st::emojiPanCategories);
+			_st.categoriesBg);
 	}, lifetime());
 
 	if (hasEmojiTab()) {
@@ -468,6 +496,10 @@ TabbedSelector::TabbedSelector(
 }
 
 TabbedSelector::~TabbedSelector() = default;
+
+const style::EmojiPan &TabbedSelector::st() const {
+	return _st;
+}
 
 Main::Session &TabbedSelector::session() const {
 	return _show->session();
@@ -490,9 +522,19 @@ TabbedSelector::Tab TabbedSelector::createTab(SelectorTab type, int index) {
 				.show = _show,
 				.mode = (_mode == Mode::EmojiStatus
 					? EmojiMode::EmojiStatus
+					: _mode == Mode::ChannelStatus
+					? EmojiMode::ChannelStatus
+					: _mode == Mode::BackgroundEmoji
+					? EmojiMode::BackgroundEmoji
+					: _mode == Mode::FullReactions
+					? EmojiMode::FullReactions
+					: _mode == Mode::RecentReactions
+					? EmojiMode::RecentReactions
 					: EmojiMode::Full),
+				.customTextColor = _customTextColor,
 				.paused = paused,
 				.st = &_st,
+				.features = _features,
 			});
 		}
 		case SelectorTab::Stickers: {
@@ -503,6 +545,7 @@ TabbedSelector::Tab TabbedSelector::createTab(SelectorTab type, int index) {
 				.mode = StickersMode::Full,
 				.paused = paused,
 				.st = &_st,
+				.features = _features,
 			});
 		}
 		case SelectorTab::Gifs: {
@@ -521,6 +564,7 @@ TabbedSelector::Tab TabbedSelector::createTab(SelectorTab type, int index) {
 				.mode = StickersMode::Masks,
 				.paused = paused,
 				.st = &_st,
+				.features = _features,
 			});
 		}
 		}
@@ -665,10 +709,16 @@ void TabbedSelector::updateScrollGeometry(QSize oldSize) {
 }
 
 void TabbedSelector::updateFooterGeometry() {
-	_footerTop = _dropDown ? 0 : (height() - _st.footer);
+	_footerTop = _dropDown
+		? 0
+		: _noFooter
+		? (height() - _roundRadius)
+		: (height() - _st.footer);
 	for (auto &tab : _tabs) {
-		tab.footer()->resizeToWidth(width());
-		tab.footer()->moveToLeft(0, _footerTop);
+		if (tab.hasFooter()) {
+			tab.footer()->resizeToWidth(width());
+			tab.footer()->moveToLeft(0, _footerTop);
+		}
 	}
 }
 
@@ -704,10 +754,10 @@ void TabbedSelector::paintSlideFrame(QPainter &p) {
 	if (_roundRadius > 0) {
 		paintBgRoundedPart(p);
 	} else if (_tabsSlider) {
-		p.fillRect(0, 0, width(), _tabsSlider->height(), st::emojiPanBg);
+		p.fillRect(0, 0, width(), _tabsSlider->height(), _st.bg);
 	}
 	auto slideDt = _a_slide.value(1.);
-	_slideAnimation->paintFrame(p, slideDt, 1.);
+	_slideAnimation->paintFrame(p, _st, slideDt, 1.);
 }
 
 void TabbedSelector::paintBgRoundedPart(QPainter &p) {
@@ -716,7 +766,7 @@ void TabbedSelector::paintBgRoundedPart(QPainter &p) {
 		: _tabsSlider
 		? QRect(0, 0, width(), _tabsSlider->height())
 		: QRect(0, 0, width(), _roundRadius);
-	Ui::FillRoundRect(p, fill, st::emojiPanBg, {
+	Ui::FillRoundRect(p, fill, _st.bg, {
 		.p = {
 			_dropDown ? QPixmap() : _panelRounding.p[0],
 			_dropDown ? QPixmap() : _panelRounding.p[1],
@@ -738,7 +788,7 @@ void TabbedSelector::paintContent(QPainter &p) {
 			0,
 			_footerTop,
 			width(),
-			_st.footer);
+			_noFooter ? _roundRadius : _st.footer);
 		Ui::FillRoundRect(p, footerPart, footerBg, {
 			.p = {
 				_dropDown ? pixmaps.p[0] : QPixmap(),
@@ -765,15 +815,15 @@ void TabbedSelector::paintContent(QPainter &p) {
 				sidesTop,
 				st::emojiScroll.width,
 				sidesHeight),
-			st::emojiPanBg);
+			_st.bg);
 		p.fillRect(
 			myrtlrect(0, sidesTop, st::emojiPanRadius, sidesHeight),
-			st::emojiPanBg);
+			_st.bg);
 	}
 }
 
 int TabbedSelector::marginTop() const {
-	return _dropDown
+	return (_dropDown && !_noFooter)
 		? _st.footer
 		: _tabsSlider
 		? (_tabsSlider->height() - st::lineWidth)
@@ -781,15 +831,19 @@ int TabbedSelector::marginTop() const {
 }
 
 int TabbedSelector::scrollTop() const {
-	return tabbed() ? marginTop() : _dropDown ? _st.footer : 0;
+	return tabbed()
+		? marginTop()
+		: (_dropDown && !_noFooter)
+		? _st.footer
+		: 0;
 }
 
 int TabbedSelector::marginBottom() const {
-	return _dropDown ? _roundRadius : _st.footer;
+	return (_dropDown || _noFooter) ? _roundRadius : _st.footer;
 }
 
 int TabbedSelector::scrollBottom() const {
-	return _dropDown ? 0 : marginBottom();
+	return (_dropDown || _noFooter) ? 0 : marginBottom();
 }
 
 void TabbedSelector::refreshStickers() {
@@ -912,6 +966,9 @@ void TabbedSelector::setCurrentPeer(PeerData *peer) {
 	}
 	_currentPeer = peer;
 	checkRestrictedPeer();
+	if (hasEmojiTab()) {
+		emoji()->showMegagroupSet(peer ? peer->asMegagroup() : nullptr);
+	}
 	if (hasStickersTab()) {
 		stickers()->showMegagroupSet(peer ? peer->asMegagroup() : nullptr);
 	}
@@ -984,7 +1041,9 @@ void TabbedSelector::showAll() {
 	if (isRestrictedView()) {
 		_restrictedLabel->show();
 	} else {
-		currentTab()->footer()->show();
+		if (currentTab()->hasFooter()) {
+			currentTab()->footer()->show();
+		}
 		_scroll->show();
 		_bottomShadow->setVisible(_mode == Mode::EmojiStatus);
 	}
@@ -1030,7 +1089,7 @@ void TabbedSelector::setAllowEmojiWithoutPremium(bool allow) {
 }
 
 void TabbedSelector::createTabsSlider() {
-	_tabsSlider.create(this, st::emojiTabs);
+	_tabsSlider.create(this, _st.tabs);
 
 	fillTabsSliderSections();
 
@@ -1071,7 +1130,7 @@ void TabbedSelector::fillTabsSliderSections() {
 }
 
 bool TabbedSelector::hasSectionIcons() const {
-	return !_restrictedLabel;
+	return !_restrictedLabel && !_noFooter;
 }
 
 void TabbedSelector::switchTab() {
@@ -1096,7 +1155,9 @@ void TabbedSelector::switchTab() {
 	auto widget = _scroll->takeWidget<Inner>();
 	widget->setParent(this);
 	widget->hide();
-	currentTab()->footer()->hide();
+	if (currentTab()->hasFooter()) {
+		currentTab()->footer()->hide();
+	}
 	currentTab()->returnWidget(std::move(widget));
 
 	_currentTabType = newTabType;
@@ -1324,7 +1385,7 @@ void TabbedSelector::Inner::paintEmptySearchResults(
 		iconTop + icon.height() - st::normalFont->height,
 		height() - 2 * st::normalFont->height);
 	p.setFont(st::normalFont);
-	p.setPen(st::windowSubTextFg);
+	p.setPen(_st.tabs.labelFg);
 	p.drawTextLeft(
 		(width() - textWidth) / 2,
 		textTop,

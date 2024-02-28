@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "data/data_user.h"
 #include "ui/boxes/confirm_box.h"
+#include "boxes/abstract_box.h"
 #include "boxes/phone_banned_box.h"
 #include "core/application.h"
 #include "window/window_controller.h"
@@ -168,7 +169,8 @@ void PhoneWidget::submit() {
 
 	// Check if such account is authorized already.
 	const auto digitsOnly = [](QString value) {
-		return value.replace(QRegularExpression("[^0-9]"), QString());
+		static const auto RegExp = QRegularExpression("[^0-9]");
+		return value.replace(RegExp, QString());
 	};
 	const auto phoneDigits = digitsOnly(phone);
 	for (const auto &[index, existing] : Core::App().domain().accounts()) {

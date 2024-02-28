@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "api/api_common.h"
+#include "chat_helpers/compose/compose_features.h"
 #include "ui/rp_widget.h"
 #include "ui/effects/animations.h"
 #include "ui/effects/message_sending_animation_common.h"
@@ -75,6 +76,26 @@ struct EmojiChosen {
 
 using InlineChosen = InlineBots::ResultSelected;
 
+enum class TabbedSelectorMode {
+	Full,
+	EmojiOnly,
+	MediaEditor,
+	EmojiStatus,
+	ChannelStatus,
+	BackgroundEmoji,
+	FullReactions,
+	RecentReactions,
+};
+
+struct TabbedSelectorDescriptor {
+	std::shared_ptr<Show> show;
+	const style::EmojiPan &st;
+	PauseReason level = {};
+	TabbedSelectorMode mode = TabbedSelectorMode::Full;
+	Fn<QColor()> customTextColor;
+	ComposeFeatures features;
+};
+
 [[nodiscard]] std::unique_ptr<Ui::TabbedSearch> MakeSearch(
 	not_null<Ui::RpWidget*> parent,
 	const style::EmojiPan &st,
@@ -86,12 +107,7 @@ using InlineChosen = InlineBots::ResultSelected;
 class TabbedSelector : public Ui::RpWidget {
 public:
 	static constexpr auto kPickCustomTimeId = -1;
-	enum class Mode {
-		Full,
-		EmojiOnly,
-		MediaEditor,
-		EmojiStatus,
-	};
+	using Mode = TabbedSelectorMode;
 	enum class Action {
 		Update,
 		Cancel,
@@ -102,8 +118,12 @@ public:
 		std::shared_ptr<Show> show,
 		PauseReason level,
 		Mode mode = Mode::Full);
+	TabbedSelector(
+		QWidget *parent,
+		TabbedSelectorDescriptor &&descriptor);
 	~TabbedSelector();
 
+	[[nodiscard]] const style::EmojiPan &st() const;
 	[[nodiscard]] Main::Session &session() const;
 	[[nodiscard]] PauseReason level() const;
 
@@ -175,16 +195,19 @@ private:
 		object_ptr<Inner> takeWidget();
 		void returnWidget(object_ptr<Inner> widget);
 
-		SelectorTab type() const {
+		[[nodiscard]] SelectorTab type() const {
 			return _type;
 		}
-		int index() const {
+		[[nodiscard]] int index() const {
 			return _index;
 		}
-		Inner *widget() const {
+		[[nodiscard]] Inner *widget() const {
 			return _weak;
 		}
-		not_null<InnerFooter*> footer() const {
+		[[nodiscard]] bool hasFooter() const {
+			return _footer != nullptr;
+		}
+		[[nodiscard]] not_null<InnerFooter*> footer() const {
 			return _footer;
 		}
 
@@ -192,7 +215,7 @@ private:
 		void saveScrollTop(int scrollTop) {
 			_scrollTop = scrollTop;
 		}
-		int getScrollTop() const {
+		[[nodiscard]] int getScrollTop() const {
 			return _scrollTop;
 		}
 
@@ -254,12 +277,15 @@ private:
 	not_null<StickersListWidget*> masks() const;
 
 	const style::EmojiPan &_st;
+	const ComposeFeatures _features;
 	const std::shared_ptr<Show> _show;
 	const PauseReason _level = {};
+	const Fn<QColor()> _customTextColor;
 
 	Mode _mode = Mode::Full;
 	int _roundRadius = 0;
 	int _footerTop = 0;
+	bool _noFooter = false;
 	Ui::CornersPixmaps _panelRounding;
 	Ui::CornersPixmaps _categoriesRounding;
 	PeerData *_currentPeer = nullptr;

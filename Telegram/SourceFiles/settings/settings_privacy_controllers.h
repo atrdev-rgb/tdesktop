@@ -109,12 +109,26 @@ public:
 		Exception exception) const override;
 	rpl::producer<QString> exceptionsDescription() const override;
 
+	void handleExceptionsChange(
+		Exception exception,
+		rpl::producer<int> value) override;
+
+	object_ptr<Ui::RpWidget> setupBelowWidget(
+		not_null<Window::SessionController*> controller,
+		not_null<QWidget*> parent,
+		rpl::producer<Option> option) override;
+
 	void confirmSave(
 		bool someAreDisallowed,
 		Fn<void()> saveCallback) override;
 
+	void saveAdditional() override;
+
 private:
 	const not_null<::Main::Session*> _session;
+	rpl::variable<Option> _option;
+	rpl::variable<int> _exceptionsNever;
+	bool _hideReadTime = false;
 
 };
 
@@ -152,7 +166,8 @@ public:
 
 	object_ptr<Ui::RpWidget> setupBelowWidget(
 		not_null<Window::SessionController*> controller,
-		not_null<QWidget*> parent) override;
+		not_null<QWidget*> parent,
+		rpl::producer<Option> option) override;
 
 };
 
@@ -235,9 +250,10 @@ public:
 		rpl::producer<Option> optionValue,
 		not_null<QWidget*> outerContainer) override;
 
-	object_ptr<Ui::RpWidget> setupBelowWidget(
+	object_ptr<Ui::RpWidget> setupMiddleWidget(
 		not_null<Window::SessionController*> controller,
-		not_null<QWidget*> parent) override;
+		not_null<QWidget*> parent,
+		rpl::producer<Option> optionValue) override;
 
 	void saveAdditional() override;
 
@@ -267,6 +283,23 @@ public:
 
 private:
 	rpl::lifetime _lifetime;
+
+};
+
+class AboutPrivacyController final : public EditPrivacyController {
+public:
+	using Option = EditPrivacyBox::Option;
+	using Exception = EditPrivacyBox::Exception;
+
+	Key key() const override;
+
+	rpl::producer<QString> title() const override;
+	rpl::producer<QString> optionsTitleKey() const override;
+	rpl::producer<QString> exceptionButtonTextKey(
+		Exception exception) const override;
+	rpl::producer<QString> exceptionBoxTitle(
+		Exception exception) const override;
+	rpl::producer<QString> exceptionsDescription() const override;
 
 };
 

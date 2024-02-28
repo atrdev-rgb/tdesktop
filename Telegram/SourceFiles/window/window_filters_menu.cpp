@@ -27,7 +27,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/boxes/confirm_box.h"
 #include "boxes/filters/edit_filter_box.h"
 #include "boxes/premium_limits_box.h"
-#include "settings/settings_common.h"
 #include "settings/settings_folders.h"
 #include "storage/storage_media_prepare.h"
 #include "api/api_chat_filters.h"
@@ -39,6 +38,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Window {
 namespace {
+
+[[nodiscard]] Dialogs::UnreadState MainListMapUnreadState(
+		not_null<Main::Session*> session,
+		const Dialogs::UnreadState &state) {
+	const auto folderId = Data::Folder::kId;
+	if (const auto folder = session->data().folderLoaded(folderId)) {
+		return state - folder->chatsList()->unreadState();
+	}
+	return state;
+}
 
 [[nodiscard]] rpl::producer<Dialogs::UnreadState> MainListUnreadState(
 		not_null<Dialogs::MainList*> list) {
@@ -59,11 +68,7 @@ namespace {
 	return MainListUnreadState(
 		session->data().chatsList()
 	) | rpl::map([=](const Dialogs::UnreadState &state) {
-		const auto folderId = Data::Folder::kId;
-		if (const auto folder = session->data().folderLoaded(folderId)) {
-			return state - folder->chatsList()->unreadState();
-		}
-		return state;
+		return MainListMapUnreadState(session, state);
 	});
 }
 
@@ -310,28 +315,21 @@ base::unique_qptr<Ui::SideBarButton> FiltersMenu::prepareButton(
 		if (_reordering) {
 			return;
 		} else if (raw->locked()) {
-			_session->show(Box(FiltersLimitBox, &_session->session()));
+			_session->show(Box(
+				FiltersLimitBox,
+				&_session->session(),
+				std::nullopt));
 		} else if (id >= 0) {
 			_session->setActiveChatsFilter(id);
 		} else {
-			const auto filters = &_session->session().data().chatsFilters();
-			if (filters->suggestedLoaded()) {
-				_session->showSettings(Settings::Folders::Id());
-			} else if (!_waitingSuggested) {
-				_waitingSuggested = true;
-				filters->requestSuggested();
-				filters->suggestedUpdated(
-				) | rpl::take(1) | rpl::start_with_next([=] {
-					_session->showSettings(Settings::Folders::Id());
-				}, _outer.lifetime());
-			}
+			openFiltersSettings();
 		}
 	});
 	if (id >= 0) {
 		raw->setAcceptDrops(true);
 		raw->events(
 		) | rpl::filter([=](not_null<QEvent*> e) {
-			return ((e->type() == QEvent::ContextMenu) && (id > 0))
+			return ((e->type() == QEvent::ContextMenu) && (id >= 0))
 				|| e->type() == QEvent::DragEnter
 				|| e->type() == QEvent::DragMove
 				|| e->type() == QEvent::DragLeave;
@@ -362,13 +360,27 @@ base::unique_qptr<Ui::SideBarButton> FiltersMenu::prepareButton(
 	return button;
 }
 
+void FiltersMenu::openFiltersSettings() {
+	const auto filters = &_session->session().data().chatsFilters();
+	if (filters->suggestedLoaded()) {
+		_session->showSettings(Settings::Folders::Id());
+	} else if (!_waitingSuggested) {
+		_waitingSuggested = true;
+		filters->requestSuggested();
+		filters->suggestedUpdated(
+		) | rpl::take(1) | rpl::start_with_next([=] {
+			_session->showSettings(Settings::Folders::Id());
+		}, _outer.lifetime());
+	}
+}
+
 void FiltersMenu::showMenu(QPoint position, FilterId id) {
 	if (_popupMenu) {
 		_popupMenu = nullptr;
 		return;
 	}
 	const auto i = _filters.find(id);
-	if (i == end(_filters)) {
+	if ((i == end(_filters)) && id) {
 		return;
 	}
 	_popupMenu = base::make_unique_q<Ui::PopupMenu>(
@@ -382,23 +394,46 @@ void FiltersMenu::showMenu(QPoint position, FilterId id) {
 			args.icon);
 	});
 
-	addAction(
-		tr::lng_filters_context_edit(tr::now),
-		[=] { showEditBox(id); },
-		&st::menuIconEdit);
+	if (id) {
+		addAction(
+			tr::lng_filters_context_edit(tr::now),
+			[=] { showEditBox(id); },
+			&st::menuIconEdit);
 
-	auto filteredChats = [=] {
-		return _session->session().data().chatsFilters().chatsList(id);
-	};
-	Window::MenuAddMarkAsReadChatListAction(
-		_session,
-		std::move(filteredChats),
-		addAction);
+		auto filteredChats = [=] {
+			return _session->session().data().chatsFilters().chatsList(id);
+		};
+		Window::MenuAddMarkAsReadChatListAction(
+			_session,
+			std::move(filteredChats),
+			addAction);
 
-	addAction(
-		tr::lng_filters_context_remove(tr::now),
-		[=] { showRemoveBox(id); },
-		&st::menuIconDelete);
+		addAction(
+			tr::lng_filters_context_remove(tr::now),
+			[=] { showRemoveBox(id); },
+			&st::menuIconDelete);
+	} else {
+		auto customUnreadState = [=] {
+			const auto session = &_session->session();
+			return MainListMapUnreadState(
+				session,
+				session->data().chatsList()->unreadState());
+		};
+		Window::MenuAddMarkAsReadChatListAction(
+			_session,
+			[=] { return _session->session().data().chatsList(); },
+			addAction,
+			std::move(customUnreadState));
+
+		addAction(
+			tr::lng_filters_setup_menu(tr::now),
+			[=] { openFiltersSettings(); },
+			&st::menuIconEdit);
+	}
+	if (_popupMenu->empty()) {
+		_popupMenu = nullptr;
+		return;
+	}
 	_popupMenu->popup(position);
 }
 
