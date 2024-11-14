@@ -7,9 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include <rpl/variable.h>
-#include "ui/rp_widget.h"
 #include "info/info_wrap_widget.h"
+#include "info/statistics/info_statistics_tag.h"
 
 namespace Dialogs::Stories {
 struct Content;
@@ -27,6 +26,10 @@ struct ScrollToRequest;
 template <typename Widget>
 class PaddingWrap;
 } // namespace Ui
+
+namespace Ui::Menu {
+struct MenuCallback;
+} // namespace Ui::Menu
 
 namespace Info::Settings {
 struct Tag;
@@ -81,6 +84,7 @@ public:
 		const QRect &newGeometry,
 		int topDelta);
 	void applyAdditionalScroll(int additionalScroll);
+	void applyMaxVisibleHeight(int maxVisibleHeight);
 	int scrollTillBottom(int forHeight) const;
 	[[nodiscard]] rpl::producer<int> scrollTillBottomChanges() const;
 	[[nodiscard]] virtual const Ui::RoundRect *bottomSkipRounding() const {
@@ -94,7 +98,14 @@ public:
 	virtual rpl::producer<SelectedItems> selectedListValue() const;
 	virtual void selectionAction(SelectionAction action) {
 	}
+	virtual void fillTopBarMenu(const Ui::Menu::MenuCallback &addAction);
 
+	[[nodiscard]] virtual bool closeByOutsideClick() const {
+		return true;
+	}
+	virtual void checkBeforeClose(Fn<void()> close) {
+		close();
+	}
 	[[nodiscard]] virtual rpl::producer<QString> title() = 0;
 	[[nodiscard]] virtual rpl::producer<QString> subtitle() {
 		return nullptr;
@@ -115,8 +126,12 @@ protected:
 			doSetInnerWidget(std::move(inner)));
 	}
 
-	not_null<Controller*> controller() const {
+	[[nodiscard]] not_null<Controller*> controller() const {
 		return _controller;
+	}
+	[[nodiscard]] not_null<Ui::ScrollArea*> scroll() const;
+	[[nodiscard]] int maxVisibleHeight() const {
+		return _maxVisibleHeight;
 	}
 
 	void resizeEvent(QResizeEvent *e) override;
@@ -151,6 +166,7 @@ private:
 	base::unique_qptr<Ui::RpWidget> _searchWrap = nullptr;
 	QPointer<Ui::InputField> _searchField;
 	int _innerDesiredHeight = 0;
+	int _maxVisibleHeight = 0;
 	bool _isStackBottom = false;
 
 	// Saving here topDelta in setGeometryWithTopMoved() to get it passed to resizeEvent().
@@ -199,14 +215,8 @@ public:
 	Stories::Tab storiesTab() const {
 		return _storiesTab;
 	}
-	PeerData *statisticsPeer() const {
-		return _statisticsPeer;
-	}
-	FullMsgId statisticsContextId() const {
-		return _statisticsContextId;
-	}
-	FullStoryId statisticsStoryId() const {
-		return _statisticsStoryId;
+	Statistics::Tag statisticsTag() const {
+		return _statisticsTag;
 	}
 	PollData *poll() const {
 		return _poll;
@@ -252,9 +262,7 @@ private:
 	UserData * const _settingsSelf = nullptr;
 	PeerData * const _storiesPeer = nullptr;
 	Stories::Tab _storiesTab = {};
-	PeerData * const _statisticsPeer = nullptr;
-	const FullMsgId _statisticsContextId;
-	const FullStoryId _statisticsStoryId;
+	Statistics::Tag _statisticsTag;
 	PollData * const _poll = nullptr;
 	const FullMsgId _pollContextId;
 

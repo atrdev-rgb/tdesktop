@@ -36,9 +36,13 @@ public:
 		NoMuted     = (1 << 5),
 		NoRead      = (1 << 6),
 		NoArchived  = (1 << 7),
+		RulesMask   = ((1 << 8) - 1),
 
 		Chatlist    = (1 << 8),
 		HasMyLinks  = (1 << 9),
+
+		NewChats      = (1 << 10), // Telegram Business exceptions.
+		ExistingChats = (1 << 11),
 	};
 	friend constexpr inline bool is_flag_type(Flag) { return true; };
 	using Flags = base::flags<Flag>;
@@ -48,6 +52,7 @@ public:
 		FilterId id,
 		const QString &title,
 		const QString &iconEmoji,
+		std::optional<uint8> colorIndex,
 		Flags flags,
 		base::flat_set<not_null<History*>> always,
 		std::vector<not_null<History*>> pinned,
@@ -67,6 +72,7 @@ public:
 	[[nodiscard]] FilterId id() const;
 	[[nodiscard]] QString title() const;
 	[[nodiscard]] QString iconEmoji() const;
+	[[nodiscard]] std::optional<uint8> colorIndex() const;
 	[[nodiscard]] Flags flags() const;
 	[[nodiscard]] bool chatlist() const;
 	[[nodiscard]] bool hasMyLinks() const;
@@ -80,6 +86,7 @@ private:
 	FilterId _id = 0;
 	QString _title;
 	QString _iconEmoji;
+	std::optional<uint8> _colorIndex;
 	base::flat_set<not_null<History*>> _always;
 	std::vector<not_null<History*>> _pinned;
 	base::flat_set<not_null<History*>> _never;
@@ -90,6 +97,7 @@ private:
 inline bool operator==(const ChatFilter &a, const ChatFilter &b) {
 	return (a.title() == b.title())
 		&& (a.iconEmoji() == b.iconEmoji())
+		&& (a.colorIndex() == b.colorIndex())
 		&& (a.flags() == b.flags())
 		&& (a.always() == b.always())
 		&& (a.never() == b.never());

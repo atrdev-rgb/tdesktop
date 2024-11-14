@@ -79,7 +79,8 @@ void ProcessUserpic(
 	if (!state->userpicView.cloud) {
 		GenerateImage(
 			state,
-			peer->generateUserpicImage(
+			PeerData::GenerateUserpicImage(
+				peer,
 				state->userpicView,
 				st::shortInfoWidth * style::DevicePixelRatio(),
 				0),
@@ -201,14 +202,28 @@ void ProcessFullPhoto(
 	return peer->session().changes().peerFlagsValue(
 		peer,
 		(UpdateFlag::Name
+			| UpdateFlag::PersonalChannel
 			| UpdateFlag::PhoneNumber
 			| UpdateFlag::Username
-			| UpdateFlag::About)
+			| UpdateFlag::About
+			| UpdateFlag::Birthday)
 	) | rpl::map([=] {
 		const auto user = peer->asUser();
-		const auto username = peer->userName();
+		const auto username = peer->username();
+		const auto channelId = user->personalChannelId();
+		const auto channel = channelId
+			? user->owner().channel(channelId).get()
+			: nullptr;
+		const auto channelUsername = channel
+			? channel->username()
+			: QString();
+		const auto hasChannel = !channelUsername.isEmpty();
 		return PeerShortInfoFields{
 			.name = peer->name(),
+			.channelName = hasChannel ? channel->name() : QString(),
+			.channelLink = (hasChannel
+				? channel->session().createInternalLinkFull(channelUsername)
+				: QString()),
 			.phone = user ? Ui::FormatPhone(user->phone()) : QString(),
 			.link = ((user || username.isEmpty())
 				? QString()
@@ -217,6 +232,7 @@ void ProcessFullPhoto(
 			.username = ((user && !username.isEmpty())
 				? ('@' + username)
 				: QString()),
+			.birthday = user ? user->birthday() : Data::Birthday(),
 			.isBio = (user && !user->isBot()),
 		};
 	});

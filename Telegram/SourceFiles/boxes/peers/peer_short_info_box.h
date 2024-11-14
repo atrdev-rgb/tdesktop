@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "data/data_birthday.h"
 #include "ui/layers/box_content.h"
 
 namespace style {
@@ -36,10 +37,13 @@ enum class PeerShortInfoType {
 
 struct PeerShortInfoFields {
 	QString name;
+	QString channelName;
+	QString channelLink;
 	QString phone;
 	QString link;
 	TextWithEntities about;
 	QString username;
+	Data::Birthday birthday;
 	bool isBio = false;
 };
 
@@ -160,7 +164,6 @@ public:
 private:
 	void prepare() override;
 	void prepareRows();
-	RectParts customCornersFilling() override;
 
 	void resizeEvent(QResizeEvent *e) override;
 
@@ -168,9 +171,12 @@ private:
 	int fillRoundedTopHeight();
 
 	[[nodiscard]] rpl::producer<QString> nameValue() const;
+	[[nodiscard]] rpl::producer<TextWithEntities> channelValue() const;
 	[[nodiscard]] rpl::producer<TextWithEntities> linkValue() const;
 	[[nodiscard]] rpl::producer<QString> phoneValue() const;
 	[[nodiscard]] rpl::producer<QString> usernameValue() const;
+	[[nodiscard]] rpl::producer<QString> birthdayLabel() const;
+	[[nodiscard]] rpl::producer<QString> birthdayValue() const;
 	[[nodiscard]] rpl::producer<TextWithEntities> aboutValue() const;
 
 	const style::ShortInfoBox &_st;

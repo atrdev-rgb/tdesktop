@@ -23,7 +23,7 @@ using Type = SelfDestructionBox::Type;
 
 [[nodiscard]] std::vector<int> Values(Type type) {
 	switch (type) {
-	case Type::Account: return { 30, 90, 180, 365 };
+	case Type::Account: return { 30, 90, 180, 365, 548, 720 };
 	case Type::Sessions: return { 7, 30, 90, 180, 365 };
 	}
 	Unexpected("SelfDestructionBox::Type in Values.");
@@ -95,7 +95,7 @@ void SelfDestructionBox::showContent() {
 
 	clearButtons();
 	addButton(tr::lng_settings_save(), [=] {
-		const auto value = _ttlGroup->value();
+		const auto value = _ttlGroup->current();
 		switch (_type) {
 		case Type::Account:
 			_session->api().selfDestruct().updateAccountTTL(value);
@@ -113,8 +113,8 @@ void SelfDestructionBox::showContent() {
 QString SelfDestructionBox::DaysLabel(int days) {
 	return !days
 		? QString()
-		: (days > 364)
-		? tr::lng_years(tr::now, lt_count, days / 365)
+		//: (days > 364)
+		//? tr::lng_years(tr::now, lt_count, days / 365)
 		: (days > 25)
 		? tr::lng_months(tr::now, lt_count, std::max(days / 30, 1))
 		: tr::lng_weeks(tr::now, lt_count, std::max(days / 7, 1));

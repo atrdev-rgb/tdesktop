@@ -33,7 +33,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QSessionManager>
 #include <QtGui/QScreen>
 #include <QtGui/qpa/qplatformscreen.h>
-#include <ksandbox.h>
 
 namespace Core {
 namespace {
@@ -83,7 +82,6 @@ bool Sandbox::QuitOnStartRequested = false;
 Sandbox::Sandbox(int &argc, char **argv)
 : QApplication(argc, argv)
 , _mainThreadId(QThread::currentThreadId()) {
-	setQuitOnLastWindowClosed(false);
 }
 
 int Sandbox::start() {
@@ -257,7 +255,10 @@ void Sandbox::setupScreenScale() {
 Sandbox::~Sandbox() = default;
 
 bool Sandbox::event(QEvent *e) {
-	if (e->type() == QEvent::Quit && !Quitting()) {
+	if (e->type() == QEvent::Quit) {
+		if (Quitting()) {
+			return QCoreApplication::event(e);
+		}
 		Quit(QuitReason::QtQuitEvent);
 		e->ignore();
 		return false;
@@ -518,10 +519,8 @@ void Sandbox::refreshGlobalProxy() {
 		|| proxy.type == MTP::ProxyData::Type::Http) {
 		QNetworkProxy::setApplicationProxy(
 			MTP::ToNetworkProxy(MTP::ToDirectIpProxy(proxy)));
-	} else if ((!Core::IsAppLaunched()
-		|| Core::App().settings().proxy().isSystem())
-		// this works stable only in sandboxed environment where it works through portal
-		&& (!Platform::IsLinux() || KSandbox::isInside() || cDebugMode())) {
+	} else if (!Core::IsAppLaunched()
+		|| Core::App().settings().proxy().isSystem()) {
 		QNetworkProxyFactory::setUseSystemConfiguration(true);
 	} else {
 		QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy);
@@ -621,7 +620,7 @@ void Sandbox::processPostponedCalls(int level) {
 bool Sandbox::nativeEventFilter(
 		const QByteArray &eventType,
 		void *message,
-		base::NativeEventResult *result) {
+		native_event_filter_result *result) {
 	registerEnterFromEventLoop();
 	return false;
 }

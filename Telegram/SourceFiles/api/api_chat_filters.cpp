@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/premium_limits_box.h"
 #include "boxes/filters/edit_filter_links.h" // FilterChatStatusText
 #include "core/application.h"
+#include "core/core_settings.h"
 #include "data/data_channel.h"
 #include "data/data_chat.h"
 #include "data/data_chat_filters.h"
@@ -26,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 #include "ui/filter_icons.h"
 #include "ui/vertical_list.h"
+#include "ui/ui_utility.h"
 #include "window/window_session_controller.h"
 #include "styles/style_filter_icons.h"
 #include "styles/style_layers.h"
@@ -151,6 +153,7 @@ void InitFilterLinkHeader(
 		.badge = (type == Ui::FilterLinkHeaderType::AddingChats
 			? std::move(count)
 			: rpl::single(0)),
+		.horizontalFilters = Core::App().settings().chatFiltersHorizontal(),
 	});
 	const auto widget = header.widget;
 	widget->resizeToWidth(st::boxWideWidth);
@@ -231,12 +234,12 @@ void ImportInvite(
 		api->request(MTPchatlists_JoinChatlistInvite(
 			MTP_string(slug),
 			MTP_vector<MTPInputPeer>(std::move(inputs))
-		)).done(callback).fail(error).send();
+		)).done(callback).fail(error).handleFloodErrors().send();
 	} else {
 		api->request(MTPchatlists_JoinChatlistUpdates(
 			MTP_inputChatlistDialogFilter(MTP_int(filterId)),
 			MTP_vector<MTPInputPeer>(std::move(inputs))
-		)).done(callback).fail(error).send();
+		)).done(callback).fail(error).handleFloodErrors().send();
 	}
 }
 
@@ -516,6 +519,8 @@ void ShowImportError(
 	} else {
 		window->showToast((error == u"INVITE_SLUG_EXPIRED"_q)
 			? tr::lng_group_invite_bad_link(tr::now)
+			: error.startsWith(u"FLOOD_WAIT_"_q)
+			? tr::lng_flood_error(tr::now)
 			: error);
 	}
 }

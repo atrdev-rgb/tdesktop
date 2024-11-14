@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/random.h"
 #include "boxes/share_box.h"
 #include "chat_helpers/compose/compose_show.h"
+#include "data/business/data_shortcut_messages.h"
 #include "data/data_chat_participant_status.h"
 #include "data/data_forum_topic.h"
 #include "data/data_histories.h"
@@ -119,6 +120,7 @@ namespace Media::Stories {
 				message.action.clearDraft = false;
 				api->sendMessage(std::move(message));
 			}
+			const auto session = &thread->session();
 			const auto threadPeer = thread->peer();
 			const auto threadHistory = thread->owningHistory();
 			const auto randomId = base::RandomValue<uint64>();
@@ -126,11 +128,21 @@ namespace Media::Stories {
 			if (action.replyTo) {
 				sendFlags |= MTPmessages_SendMedia::Flag::f_reply_to;
 			}
-			const auto silentPost = ShouldSendSilent(
-				threadPeer,
-				action.options);
+			const auto silentPost = ShouldSendSilent(threadPeer, options);
 			if (silentPost) {
 				sendFlags |= MTPmessages_SendMedia::Flag::f_silent;
+			}
+			if (options.scheduled) {
+				sendFlags |= MTPmessages_SendMedia::Flag::f_schedule_date;
+			}
+			if (options.shortcutId) {
+				sendFlags |= MTPmessages_SendMedia::Flag::f_quick_reply_shortcut;
+			}
+			if (options.effectId) {
+				sendFlags |= MTPmessages_SendMedia::Flag::f_effect;
+			}
+			if (options.invertCaption) {
+				sendFlags |= MTPmessages_SendMedia::Flag::f_invert_media;
 			}
 			const auto done = [=] {
 				if (!--state->requests) {
@@ -153,13 +165,17 @@ namespace Media::Stories {
 					MTP_long(randomId),
 					MTPReplyMarkup(),
 					MTPVector<MTPMessageEntity>(),
-					MTP_int(action.options.scheduled),
-					MTP_inputPeerEmpty()
+					MTP_int(options.scheduled),
+					MTP_inputPeerEmpty(),
+					Data::ShortcutIdToMTP(session, options.shortcutId),
+					MTP_long(options.effectId)
 				), [=](
 						const MTPUpdates &result,
 						const MTP::Response &response) {
 					done();
-				}, [=](const MTP::Error &error, const MTP::Response &response) {
+				}, [=](
+						const MTP::Error &error,
+						const MTP::Response &response) {
 					api->sendMessageFail(error, threadPeer, randomId);
 					done();
 				});

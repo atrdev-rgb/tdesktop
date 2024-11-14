@@ -109,10 +109,13 @@ using FilterId = int32;
 
 using MessageIdsList = std::vector<FullMsgId>;
 
-PeerId PeerFromMessage(const MTPmessage &message);
-MTPDmessage::Flags FlagsFromMessage(const MTPmessage &message);
-MsgId IdFromMessage(const MTPmessage &message);
-TimeId DateFromMessage(const MTPmessage &message);
+[[nodiscard]] PeerId PeerFromMessage(const MTPmessage &message);
+[[nodiscard]] MTPDmessage::Flags FlagsFromMessage(
+	const MTPmessage &message);
+[[nodiscard]] MsgId IdFromMessage(const MTPmessage &message);
+[[nodiscard]] TimeId DateFromMessage(const MTPmessage &message);
+[[nodiscard]] BusinessShortcutId BusinessShortcutIdFromMessage(
+	const MTPmessage &message);
 
 [[nodiscard]] inline MTPint MTP_int(MsgId id) noexcept {
 	return MTP_int(id.bare);
@@ -135,6 +138,7 @@ using PollId = uint64;
 using WallPaperId = uint64;
 using CallId = uint64;
 using BotAppId = uint64;
+using EffectId = uint64;
 
 constexpr auto CancelledWebPageId = WebPageId(0xFFFFFFFFFFFFFFFFULL);
 
@@ -309,12 +313,22 @@ enum class MessageFlag : uint64 {
 
 	// If not set then we need to refresh _displayFrom value.
 	DisplayFromChecked    = (1ULL << 40),
+	DisplayFromProfiles   = (1ULL << 41),
 
-	ShowSimilarChannels   = (1ULL << 41),
+	ShowSimilarChannels   = (1ULL << 42),
 
-	Sponsored             = (1ULL << 42),
+	Sponsored             = (1ULL << 43),
 
-	ReactionsAreTags      = (1ULL << 43),
+	ReactionsAreTags      = (1ULL << 44),
+
+	ShortcutMessage       = (1ULL << 45),
+
+	EffectWatched         = (1ULL << 46),
+
+	SensitiveContent      = (1ULL << 47),
+	HasRestrictions       = (1ULL << 48),
+
+	EstimatedDate         = (1ULL << 49),
 };
 inline constexpr bool is_flag_type(MessageFlag) { return true; }
 using MessageFlags = base::flags<MessageFlag>;

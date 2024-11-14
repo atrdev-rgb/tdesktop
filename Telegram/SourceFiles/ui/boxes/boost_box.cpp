@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/effects/fireworks_animation.h"
+#include "ui/effects/premium_bubble.h"
 #include "ui/effects/premium_graphics.h"
 #include "ui/layers/generic_box.h"
 #include "ui/text/text_utilities.h"
@@ -111,47 +112,13 @@ namespace {
 [[nodiscard]] object_ptr<Ui::FlatLabel> MakeFeaturesBadge(
 		not_null<QWidget*> parent,
 		rpl::producer<QString> text) {
-	auto result = object_ptr<Ui::FlatLabel>(
-		parent,
-		std::move(text),
-		st::boostLevelBadge);
-	const auto label = result.data();
-
-	label->show();
-	label->paintRequest() | rpl::start_with_next([=] {
-		const auto size = label->textMaxWidth();
-		const auto rect = QRect(
-			(label->width() - size) / 2,
-			st::boostLevelBadge.margin.top(),
-			size,
-			st::boostLevelBadge.style.font->height
-		).marginsAdded(st::boostLevelBadge.margin);
-		auto p = QPainter(label);
+	return MakeBoostFeaturesBadge(parent, std::move(text), [](QRect rect) {
 		auto gradient = QLinearGradient(
 			rect.topLeft(),
 			rect.topRight());
 		gradient.setStops(Ui::Premium::GiftGradientStops());
-		p.setBrush(gradient);
-		p.setPen(Qt::NoPen);
-		p.drawRoundedRect(rect, rect.height() / 2., rect.height() / 2.);
-
-		const auto &lineFg = st::windowBgRipple;
-		const auto line = st::boostLevelBadgeLine;
-		const auto top = st::boostLevelBadge.margin.top()
-			+ ((st::boostLevelBadge.style.font->height - line) / 2);
-		const auto left = 0;
-		const auto skip = st::boostLevelBadgeSkip;
-		if (const auto right = rect.x() - skip; right > left) {
-			p.fillRect(left, top, right - left, line, lineFg);
-		}
-		const auto right = label->width();
-		if (const auto left = rect.x() + rect.width() + skip
-			; left < right) {
-			p.fillRect(left, top, right - left, line, lineFg);
-		}
-	}, label->lifetime());
-
-	return result;
+		return QBrush(gradient);
+	});
 }
 
 void AddFeaturesList(
@@ -174,7 +141,7 @@ void AddFeaturesList(
 			st::boostFeatureIconPosition);
 	};
 	const auto proj = &Ui::Text::RichLangValue;
-	const auto max = std::max({
+	const auto lowMax = std::max({
 		features.linkLogoLevel,
 		features.transcribeLevel,
 		features.emojiPackLevel,
@@ -188,9 +155,13 @@ void AddFeaturesList(
 			? 0
 			: features.linkStylesByLevel.back().first),
 	});
+	const auto highMax = std::max(lowMax, features.sponsoredLevel);
 	auto nameColors = 0;
 	auto linkStyles = 0;
-	for (auto i = std::max(startFromLevel, 1); i <= max; ++i) {
+	for (auto i = std::max(startFromLevel, 1); i <= highMax; ++i) {
+		if ((i > lowMax) && (i < highMax)) {
+			continue;
+		}
 		const auto unlocks = (i == startFromLevel);
 		container->add(
 			MakeFeaturesBadge(
@@ -201,57 +172,15 @@ void AddFeaturesList(
 						lt_count,
 						rpl::single(float64(i)))),
 			st::boostLevelBadgePadding);
-		add(
-			tr::lng_feature_stories(lt_count, rpl::single(float64(i)), proj),
-			st::boostFeatureStories);
-		if (!group) {
-			add(tr::lng_feature_reactions(
-				lt_count,
-				rpl::single(float64(i)),
-				proj
-			), st::boostFeatureCustomReactions);
-			if (const auto j = features.nameColorsByLevel.find(i)
-				; j != end(features.nameColorsByLevel)) {
-				nameColors += j->second;
-			}
-			if (nameColors > 0) {
-				add(tr::lng_feature_name_color_channel(
-					lt_count,
-					rpl::single(float64(nameColors)),
-					proj
-				), st::boostFeatureName);
-			}
-			if (const auto j = features.linkStylesByLevel.find(i)
-				; j != end(features.linkStylesByLevel)) {
-				linkStyles += j->second;
-			}
-			if (linkStyles > 0) {
-				add(tr::lng_feature_link_style_channel(
-					lt_count,
-					rpl::single(float64(linkStyles)),
-					proj
-				), st::boostFeatureLink);
-			}
-			if (i >= features.linkLogoLevel) {
-				add(
-					tr::lng_feature_link_emoji(proj),
-					st::boostFeatureCustomLink);
-			}
+		if (i >= features.sponsoredLevel) {
+			add(tr::lng_channel_earn_off(proj), st::boostFeatureOffSponsored);
 		}
-		if (group && i >= features.emojiPackLevel) {
+		if (i >= features.customWallpaperLevel) {
 			add(
-				tr::lng_feature_custom_emoji_pack(proj),
-				st::boostFeatureCustomEmoji);
-		}
-		if (group && i >= features.transcribeLevel) {
-			add(
-				tr::lng_feature_transcribe(proj),
-				st::boostFeatureTranscribe);
-		}
-		if (i >= features.emojiStatusLevel) {
-			add(
-				tr::lng_feature_emoji_status(proj),
-				st::boostFeatureEmojiStatus);
+				(group
+					? tr::lng_feature_custom_background_group
+					: tr::lng_feature_custom_background_channel)(proj),
+				st::boostFeatureCustomBackground);
 		}
 		if (i >= features.wallpaperLevel) {
 			add(
@@ -263,13 +192,58 @@ void AddFeaturesList(
 						proj),
 				st::boostFeatureBackground);
 		}
-		if (i >= features.customWallpaperLevel) {
+		if (i >= features.emojiStatusLevel) {
 			add(
-				(group
-					? tr::lng_feature_custom_background_group
-					: tr::lng_feature_custom_background_channel)(proj),
-				st::boostFeatureCustomBackground);
+				tr::lng_feature_emoji_status(proj),
+				st::boostFeatureEmojiStatus);
 		}
+		if (group && i >= features.transcribeLevel) {
+			add(
+				tr::lng_feature_transcribe(proj),
+				st::boostFeatureTranscribe);
+		}
+		if (group && i >= features.emojiPackLevel) {
+			add(
+				tr::lng_feature_custom_emoji_pack(proj),
+				st::boostFeatureCustomEmoji);
+		}
+		if (!group) {
+			if (const auto j = features.linkStylesByLevel.find(i)
+				; j != end(features.linkStylesByLevel)) {
+				linkStyles += j->second;
+			}
+			if (i >= features.linkLogoLevel) {
+				add(
+					tr::lng_feature_link_emoji(proj),
+					st::boostFeatureCustomLink);
+			}
+			if (linkStyles > 0) {
+				add(tr::lng_feature_link_style_channel(
+					lt_count,
+					rpl::single(float64(linkStyles)),
+					proj
+				), st::boostFeatureLink);
+			}
+			if (const auto j = features.nameColorsByLevel.find(i)
+				; j != end(features.nameColorsByLevel)) {
+				nameColors += j->second;
+			}
+			if (nameColors > 0) {
+				add(tr::lng_feature_name_color_channel(
+					lt_count,
+					rpl::single(float64(nameColors)),
+					proj
+				), st::boostFeatureName);
+			}
+			add(tr::lng_feature_reactions(
+				lt_count,
+				rpl::single(float64(i)),
+				proj
+			), st::boostFeatureCustomReactions);
+		}
+		add(
+			tr::lng_feature_stories(lt_count, rpl::single(float64(i)), proj),
+			st::boostFeatureStories);
 	}
 }
 
@@ -396,7 +370,9 @@ void BoostBox(
 		close->parentWidget(),
 		MakeTitle(
 			box,
-			rpl::duplicate(title),
+			(data.group
+				? tr::lng_boost_group_button
+				: tr::lng_boost_channel_button)(),
 			rpl::duplicate(repeated),
 			false));
 	const auto titleInner = faded.data();
@@ -677,17 +653,18 @@ void AskBoostBox(
 
 	box->addTopButton(st::boxTitleClose, [=] { box->closeBox(); });
 
-	auto title = v::match(data.reason.data, [&](
-			AskBoostChannelColor data) {
+	auto title = v::match(data.reason.data, [](AskBoostChannelColor) {
 		return tr::lng_boost_channel_title_color();
-	}, [&](AskBoostWallpaper data) {
+	}, [](AskBoostWallpaper) {
 		return tr::lng_boost_channel_title_wallpaper();
-	}, [&](AskBoostEmojiStatus data) {
+	}, [](AskBoostEmojiStatus) {
 		return tr::lng_boost_channel_title_status();
-	}, [&](AskBoostEmojiPack data) {
+	}, [](AskBoostEmojiPack) {
 		return tr::lng_boost_group_title_emoji();
-	}, [&](AskBoostCustomReactions data) {
+	}, [](AskBoostCustomReactions) {
 		return tr::lng_boost_channel_title_reactions();
+	}, [](AskBoostCpm) {
+		return tr::lng_boost_channel_title_cpm();
 	});
 	auto reasonText = v::match(data.reason.data, [&](
 			AskBoostChannelColor data) {
@@ -720,6 +697,11 @@ void AskBoostBox(
 			rpl::single(float64(data.count)),
 			lt_same_count,
 			rpl::single(TextWithEntities{ QString::number(data.count) }),
+			Ui::Text::RichLangValue);
+	}, [&](AskBoostCpm data) {
+		return tr::lng_boost_channel_needs_level_cpm(
+			lt_count,
+			rpl::single(float64(data.requiredLevel)),
 			Ui::Text::RichLangValue);
 	});
 	auto text = rpl::combine(
@@ -830,7 +812,7 @@ void FillBoostLimit(
 		st::boostBubble,
 		std::move(showFinished),
 		rpl::duplicate(bubbleRowState),
-		true,
+		Premium::BubbleType::Premium,
 		nullptr,
 		&st::premiumIconBoost,
 		limitLinePadding);
@@ -867,6 +849,50 @@ void FillBoostLimit(
 		},
 		std::move(limitState),
 		limitLinePadding);
+}
+
+object_ptr<Ui::FlatLabel> MakeBoostFeaturesBadge(
+		not_null<QWidget*> parent,
+		rpl::producer<QString> text,
+		Fn<QBrush(QRect)> bg) {
+	auto result = object_ptr<Ui::FlatLabel>(
+		parent,
+		std::move(text),
+		st::boostLevelBadge);
+	const auto label = result.data();
+
+	label->show();
+	label->paintRequest() | rpl::start_with_next([=] {
+		const auto size = label->textMaxWidth();
+		const auto rect = QRect(
+			(label->width() - size) / 2,
+			st::boostLevelBadge.margin.top(),
+			size,
+			st::boostLevelBadge.style.font->height
+		).marginsAdded(st::boostLevelBadge.margin);
+		auto p = QPainter(label);
+		auto hq = PainterHighQualityEnabler(p);
+		p.setBrush(bg(rect));
+		p.setPen(Qt::NoPen);
+		p.drawRoundedRect(rect, rect.height() / 2., rect.height() / 2.);
+
+		const auto &lineFg = st::windowBgRipple;
+		const auto line = st::boostLevelBadgeLine;
+		const auto top = st::boostLevelBadge.margin.top()
+			+ ((st::boostLevelBadge.style.font->height - line) / 2);
+		const auto left = 0;
+		const auto skip = st::boostLevelBadgeSkip;
+		if (const auto right = rect.x() - skip; right > left) {
+			p.fillRect(left, top, right - left, line, lineFg);
+		}
+		const auto right = label->width();
+		if (const auto left = rect.x() + rect.width() + skip
+			; left < right) {
+			p.fillRect(left, top, right - left, line, lineFg);
+		}
+	}, label->lifetime());
+
+	return result;
 }
 
 } // namespace Ui

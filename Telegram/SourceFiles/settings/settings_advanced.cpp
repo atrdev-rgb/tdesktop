@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/boxes/single_choice_box.h"
 #include "ui/painter.h"
 #include "ui/vertical_list.h"
+#include "ui/ui_utility.h"
 #include "boxes/connection_box.h"
 #include "boxes/about_box.h"
 #include "ui/boxes/confirm_box.h"
@@ -822,7 +823,7 @@ void SetupHardwareAcceleration(not_null<Ui::VerticalLayout*> container) {
 	}, container->lifetime());
 }
 
-#ifdef Q_OS_WIN
+#ifdef DESKTOP_APP_USE_ANGLE
 void SetupANGLE(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container) {
@@ -895,7 +896,7 @@ void SetupANGLE(
 		}));
 	});
 }
-#endif // Q_OS_WIN
+#endif // DESKTOP_APP_USE_ANGLE
 
 void SetupOpenGL(
 		not_null<Window::SessionController*> controller,
@@ -938,13 +939,13 @@ void SetupPerformance(
 		not_null<Ui::VerticalLayout*> container) {
 	SetupAnimations(&controller->window(), container);
 	SetupHardwareAcceleration(container);
-#ifdef Q_OS_WIN
+#ifdef DESKTOP_APP_USE_ANGLE
 	SetupANGLE(controller, container);
-#else // Q_OS_WIN
+#else // DESKTOP_APP_USE_ANGLE
 	if constexpr (!Platform::IsMac()) {
 		SetupOpenGL(controller, container);
 	}
-#endif // Q_OS_WIN
+#endif // DESKTOP_APP_USE_ANGLE
 }
 
 void SetupWindowTitle(
@@ -976,10 +977,6 @@ Advanced::Advanced(
 
 rpl::producer<QString> Advanced::title() {
 	return tr::lng_settings_advanced();
-}
-
-rpl::producer<Type> Advanced::sectionShowOther() {
-	return _showOther.events();
 }
 
 void Advanced::setupContent(not_null<Window::SessionController*> controller) {
@@ -1033,9 +1030,7 @@ void Advanced::setupContent(not_null<Window::SessionController*> controller) {
 	AddSkip(content);
 	AddDivider(content);
 	AddSkip(content);
-	SetupExport(controller, content, [=](Type type) {
-		_showOther.fire_copy(type);
-	});
+	SetupExport(controller, content, showOtherMethod());
 
 	Ui::ResizeFitChild(this, content);
 }

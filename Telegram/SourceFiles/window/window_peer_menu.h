@@ -18,6 +18,7 @@ namespace Ui {
 class RpWidget;
 class BoxContent;
 class GenericBox;
+class Show;
 } // namespace Ui
 
 namespace Data {
@@ -33,6 +34,7 @@ namespace Dialogs {
 class MainList;
 struct EntryState;
 struct UnreadState;
+class Key;
 } // namespace Dialogs
 
 namespace ChatHelpers {
@@ -63,6 +65,13 @@ bool FillVideoChatMenu(
 	Dialogs::EntryState request,
 	const PeerMenuCallback &addAction);
 
+void FillSenderUserpicMenu(
+	not_null<SessionController*> controller,
+	not_null<PeerData*> peer,
+	Ui::InputField *fieldForMention,
+	Dialogs::Key searchInEntry,
+	const PeerMenuCallback &addAction);
+
 void MenuAddMarkAsReadAllChatsAction(
 	not_null<Window::SessionController*> controller,
 	const PeerMenuCallback &addAction);
@@ -90,7 +99,7 @@ void PeerMenuCreatePoll(
 	PollData::Flags chosen = PollData::Flags(),
 	PollData::Flags disabled = PollData::Flags(),
 	Api::SendType sendType = Api::SendType::Normal,
-	SendMenu::Type sendMenuType = SendMenu::Type::Scheduled);
+	SendMenu::Details sendMenuDetails = SendMenu::Details());
 void PeerMenuDeleteTopicWithConfirmation(
 	not_null<Window::SessionNavigation*> navigation,
 	not_null<Data::ForumTopic*> topic);
@@ -109,7 +118,9 @@ void PeerMenuBlockUserBox(
 	not_null<PeerData*> peer,
 	std::variant<v::null_t, bool> suggestReport,
 	std::variant<v::null_t, ClearChat, ClearReply> suggestClear);
-void PeerMenuUnblockUserWithBotRestart(not_null<UserData*> user);
+void PeerMenuUnblockUserWithBotRestart(
+	std::shared_ptr<Ui::Show> show,
+	not_null<UserData*> user);
 
 void BlockSenderFromRepliesBox(
 	not_null<Ui::GenericBox*> box,

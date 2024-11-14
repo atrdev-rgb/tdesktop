@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/controls/userpic_button.h"
 
 #include "base/call_delayed.h"
+#include "boxes/peers/edit_peer_info_box.h" // EditPeerInfoBox::Available.
 #include "ui/effects/ripple_animation.h"
 #include "ui/empty_userpic.h"
 #include "data/data_photo.h"
@@ -26,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_utilities.h"
 #include "ui/widgets/menu/menu_action.h"
 #include "ui/painter.h"
+#include "ui/ui_utility.h"
 #include "editor/photo_editor_common.h"
 #include "editor/photo_editor_layer_widget.h"
 #include "info/userpic/info_userpic_emoji_builder_common.h"
@@ -109,9 +111,9 @@ void CameraBox(
 
 template <typename Callback>
 QPixmap CreateSquarePixmap(int width, Callback &&paintCallback) {
-	auto size = QSize(width, width) * cIntRetinaFactor();
+	const auto size = QSize(width, width) * style::DevicePixelRatio();
 	auto image = QImage(size, QImage::Format_ARGB32_Premultiplied);
-	image.setDevicePixelRatio(cRetinaFactor());
+	image.setDevicePixelRatio(style::DevicePixelRatio());
 	image.fill(Qt::transparent);
 	{
 		Painter p(&image);
@@ -285,6 +287,8 @@ void UserpicButton::choosePhotoLocally() {
 					: QString();
 				const auto phrase = (type == ChosenType::Suggest)
 					? &tr::lng_profile_suggest_sure
+					: (user && EditPeerInfoBox::Available(user))
+					? nullptr
 					: (user && !user->isSelf())
 					? &tr::lng_profile_set_personal_sure
 					: nullptr;
@@ -416,7 +420,7 @@ void UserpicButton::openPeerPhoto() {
 		return;
 	}
 	const auto photo = _peer->owner().photo(id);
-	if (photo->date && _controller) {
+	if (photo->date() && _controller) {
 		_controller->openPhoto(photo, _peer);
 	}
 }
@@ -712,14 +716,15 @@ void UserpicButton::handleStreamingUpdate(Media::Streaming::Update &&update) {
 
 	v::match(update.data, [&](Information &update) {
 		streamingReady(std::move(update));
-	}, [&](const PreloadedVideo &update) {
-	}, [&](const UpdateVideo &update) {
+	}, [](PreloadedVideo) {
+	}, [&](UpdateVideo) {
 		this->update();
-	}, [&](const PreloadedAudio &update) {
-	}, [&](const UpdateAudio &update) {
-	}, [&](const WaitingForData &update) {
-	}, [&](MutedByOther) {
-	}, [&](Finished) {
+	}, [](PreloadedAudio) {
+	}, [](UpdateAudio) {
+	}, [](WaitingForData) {
+	}, [](SpeedEstimate) {
+	}, [](MutedByOther) {
+	}, [](Finished) {
 	});
 }
 
@@ -744,7 +749,7 @@ void UserpicButton::updateVideo() {
 		return;
 	}
 	const auto photo = _peer->owner().photo(id);
-	if (!photo->date || !photo->videoCanBePlayed()) {
+	if (!photo->date() || !photo->videoCanBePlayed()) {
 		clearStreaming();
 		return;
 	} else if (_streamed && _streamedPhoto == photo) {
@@ -931,7 +936,7 @@ void UserpicButton::showCustom(QImage &&image) {
 	if (_userpicHasImage) {
 		auto size = QSize(_st.photoSize, _st.photoSize);
 		auto small = image.scaled(
-			size * cIntRetinaFactor(),
+			size * style::DevicePixelRatio(),
 			Qt::IgnoreAspectRatio,
 			Qt::SmoothTransformation);
 		_userpic = Ui::PixmapFromImage(useForumShape()
@@ -945,7 +950,7 @@ void UserpicButton::showCustom(QImage &&image) {
 			fillShape(p, _st.changeButton.textBg);
 		});
 	}
-	_userpic.setDevicePixelRatio(cRetinaFactor());
+	_userpic.setDevicePixelRatio(style::DevicePixelRatio());
 	_userpicUniqueKey = {};
 	_result = std::move(image);
 
@@ -1022,10 +1027,12 @@ void UserpicButton::prepareUserpicPixmap() {
 							true);
 						p.drawImage(QRect(0, 0, size, size), _userpicView.cached);
 					} else {
-						const auto empty = _peer->generateUserpicImage(
+						const auto empty = PeerData::GenerateUserpicImage(
+							_peer,
 							_userpicView,
 							size * ratio,
-							size * ratio * Ui::ForumUserpicRadiusMultiplier());
+							(size * ratio)
+								* Ui::ForumUserpicRadiusMultiplier());
 						p.drawImage(QRect(0, 0, size, size), empty);
 					}
 				} else {
